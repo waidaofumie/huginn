@@ -1,19 +1,16 @@
-require 'rails_helper'
+require "rails_helper"
 
 describe DelayedJobWorker do
   before do
     @djw = DelayedJobWorker.new
-  end
-
-  it "should run" do
-    mock.instance_of(Delayed::Worker).start
-    @djw.run
+    @worker = instance_double(Delayed::Worker, start: nil, stop: nil)
+    allow(Delayed::Worker).to receive(:new).and_return(@worker)
   end
 
   it "should stop" do
-    mock.instance_of(Delayed::Worker).start
-    mock.instance_of(Delayed::Worker).stop
+    expect(@worker).to receive(:start)
     @djw.run
+    expect(@worker).to receive(:stop)
     @djw.stop
   end
 
@@ -22,7 +19,7 @@ describe DelayedJobWorker do
       workers = DelayedJobWorker.setup_worker
       expect(workers).to be_a(Array)
       expect(workers.first).to be_a(DelayedJobWorker)
-      expect(workers.first.id).to eq('DelayedJobWorker')
+      expect(workers.first.id).to eq("DelayedJobWorker")
     end
   end
 end

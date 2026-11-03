@@ -33,10 +33,6 @@ describe Agents::MqttAgent do
   end
 
   describe "#check" do
-    it "should create events in the initial run" do
-      expect { @checker.check }.to change { Event.count }.by(2)
-    end
-
     it "should ignore retained messages that are previously received" do
       expect { @checker.check }.to change { Event.count }.by(2)
       expect { @checker.check }.to change { Event.count }.by(1)
@@ -51,7 +47,7 @@ describe Agents::MqttAgent do
       @checker.check
       expect(@checker.reload).to be_working
       three_days_from_now = 3.days.from_now
-      stub(Time).now { three_days_from_now }
+      allow(Time).to receive(:now) { three_days_from_now }
       expect(@checker).not_to be_working
     end
   end

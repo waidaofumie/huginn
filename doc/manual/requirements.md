@@ -2,22 +2,9 @@
 
 ## Operating Systems
 
-### Supported Unix distributions by this guide
+The [Docker images](../docker/install.md) are the recommended way to run Huginn.  They are built on Ubuntu 24.04 (Noble) and tested by CI.
 
-- Ubuntu (18.04, 16.04 and 14.04)
-- Debian (Stretch and Jessie)
-
-### Unsupported Unix distributions
-
-- CentOS
-- Red Hat Enterprise Linux
-- OS X
-- Arch Linux
-- Fedora
-- Gentoo
-- FreeBSD
-
-On the above unsupported distributions is still possible to install Huginn, and many people do. Follow the [installation guide](./installation.md) and substitute the `apt` commands with the corresponding package manager commands of your distribution.
+The [installation guide](./installation.md) uses `apt` on Debian and Ubuntu.  It is maintained on a best-effort basis and is not tested on every release, so some package names may differ on your release.  Huginn can also be installed on other Unix systems, such as Fedora, Arch Linux, macOS, and FreeBSD, by substituting the corresponding package manager commands.
 
 ### Non-Unix operating systems such as Windows
 
@@ -27,7 +14,7 @@ Please consider using a virtual machine to run Huginn on Windows.
 
 ## Ruby versions
 
-Huginn requires Ruby (MRI) 2.2 or 2.3.
+Huginn requires Ruby (MRI) 3.4.0 or newer. The current Docker images and manual installation guide use Ruby 4.0.7.
 You will have to use the standard MRI implementation of Ruby.
 We love [JRuby](http://jruby.org/) and [Rubinius](http://rubini.us/) but Huginn needs several Gems that have native extensions.
 
@@ -46,17 +33,21 @@ With less memory you need to manually adjust the `Gemfile` and Huginn can respon
 
 - 256MB RAM + 0.5GB of swap is the absolute minimum but we strongly **advise against** this amount of memory. See the Wiki page about running Huginn on [systems with low memory](https://github.com/huginn/huginn/wiki/Running-Huginn-on-minimal-systems-with-low-RAM-&-CPU-e.g.-Raspberry-Pi)
 - 0.5GB RAM + 0.5GB swap will work relatively well with SSD drives, but can feel a bit slow due to swapping
-- 1GB RAM + 1GB swap will work with two unicorn workers and the threaded background worker
-- **2GB RAM** is the **recommended** memory size, it will support 2 unicorn workers and both the threaded and the old separate workers
+- 1GB RAM + 1GB swap will work with two Puma workers and the threaded background worker
+- **2GB RAM** is the **recommended** memory size, it will support 2 Puma workers and both the threaded and the old separate workers
 - for each 300MB of additional RAM you can run one extra DelayedJob worker
 
-## Unicorn Workers
+## Puma Workers
 
-It's possible to increase the amount of unicorn workers and this will usually help for to reduce the response time of the applications and increase the ability to handle parallel requests.
+It's possible to increase the amount of Puma workers and this will usually help reduce the response time of the application and increase the ability to handle parallel requests.
 
-For most instances we recommend using: CPU cores = unicorn workers.
+For most instances we recommend using: CPU cores = Puma workers.
 
-If you have a 512MB machine we recommend to configure only one Unicorn worker and use the threaded background worker to prevent excessive swapping.
+Huginn keeps Puma single-threaded by default.  Increase `WEB_CONCURRENCY` first, and only raise `RAILS_MAX_THREADS` after auditing thread safety.
+
+If you run Puma with multiple workers, you can also set `PUMA_FORK_WORKER_AFTER_REQUESTS` to enable Puma's experimental [`fork_worker`](https://puma.io/puma/file.fork_worker.html) mode and periodically refork each worker after a given number of requests.  Leave it unset to disable this behavior.
+
+If you have a 512MB machine we recommend configuring only one Puma worker and using the threaded background worker to prevent excessive swapping.
 
 
 ## DelayedJob Workers

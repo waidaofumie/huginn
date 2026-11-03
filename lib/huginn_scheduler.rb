@@ -61,7 +61,7 @@ class Rufus::Scheduler
         job.scheduler_agent_id = agent_id
 
         if scheduler_agent = job.scheduler_agent
-          scheduler_agent.control!
+          Agent.with_execution_lock(scheduler_agent.id) { |agent| agent.control! }
         else
           puts "Unscheduling SchedulerAgent##{job.scheduler_agent_id} (disabled or deleted)"
           job.unschedule
@@ -112,7 +112,8 @@ class HuginnScheduler < LongRunnable::Worker
   }
 
   def setup
-    tzinfo_friendly_timezone = ActiveSupport::TimeZone::MAPPING[ENV['TIMEZONE'].presence || "Pacific Time (US & Canada)"]
+    Time.zone = ENV['TIMEZONE'].presence || 'Pacific Time (US & Canada)'
+    tzinfo_friendly_timezone = Time.zone.tzinfo.identifier
 
     # Schedule event propagation.
     every '1m' do
@@ -162,8 +163,11 @@ class HuginnScheduler < LongRunnable::Worker
 
   def run_schedule(time)
     with_mutex do
-      puts "Queuing schedule for #{time}"
-      AgentRunScheduleJob.perform_later(time)
+      if AgentRunScheduleJob.perform_later(time)
+        puts "Queued schedule for #{time}"
+      else
+        puts "Skipped schedule for #{time} (already queued)"
+      end
     end
   end
 

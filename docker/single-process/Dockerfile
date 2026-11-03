@@ -1,30 +1,59 @@
-FROM ubuntu:18.04
+# Smokescreen is an egress proxy that refuses connections to private and
+# link-local addresses.  It is started inside the container when
+# ENABLE_SMOKESCREEN=true; see doc/manual/outbound-requests.md.
+# renovate: datasource=git-refs depName=https://github.com/stripe/smokescreen branch=master
+ARG SMOKESCREEN_COMMIT=68e7b8218e226bc47d09ce705fdb8fed82145ceb
+
+FROM golang:1.27-alpine AS smokescreen
+ARG SMOKESCREEN_COMMIT
+RUN CGO_ENABLED=0 go install "github.com/stripe/smokescreen@${SMOKESCREEN_COMMIT}"
+
+FROM rubylang/ruby:4.0.9-noble
 
 COPY docker/scripts/prepare /scripts/
-RUN /scripts/prepare
+# Require the eMudhra CA distrust update (Ubuntu USN-8944-1).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge 20260816ubuntu0.24.04.1 && \
+    /scripts/prepare
+
+COPY --from=smokescreen /go/bin/smokescreen /usr/local/bin/smokescreen
 
 WORKDIR /app
 
-COPY ["Gemfile", "Gemfile.lock", "/app/"]
-COPY lib/gemfile_helper.rb /app/lib/
-COPY vendor/gems/ /app/vendor/gems/
+ENV HOME=/app
+
+ARG UID=1001
+RUN useradd -u "$UID" -g 0 -d /app -s /sbin/nologin -c "default user" default
+RUN chown -R "$UID:0" /app
+USER $UID
+
+ENV LC_ALL=en_US.UTF-8
+ENV RAILS_ENV=production
+
+COPY --chown="$UID:0" ["Gemfile", "Gemfile.lock", "/app/"]
+COPY --chown="$UID:0" lib/gemfile_helper.rb /app/lib/
+RUN mkdir /app/vendor
+COPY --chown="$UID:0" vendor/gems/ /app/vendor/gems/
+
+ARG ADDITIONAL_GEMS=
+ENV ADDITIONAL_GEMS=$ADDITIONAL_GEMS
 
 # Get rid of annoying "fatal: Not a git repository (or any of the parent directories): .git" messages
-RUN umask 002 && git init && \
-    LC_ALL=en_US.UTF-8 RAILS_ENV=production APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true bundle install --without test development --path vendor/bundle -j 4
+RUN git init && \
+    bundle config set --local path vendor/bundle && \
+    bundle config set --local without 'test development'
 
-COPY ./ /app/
+RUN APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true bundle install
 
-ARG OUTDATED_DOCKER_IMAGE_NAMESPACE=false
-ENV OUTDATED_DOCKER_IMAGE_NAMESPACE ${OUTDATED_DOCKER_IMAGE_NAMESPACE}
+COPY --chown="$UID:0" ./ /app/
 
-RUN umask 002 && \
-    LC_ALL=en_US.UTF-8 RAILS_ENV=production APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true bundle exec rake assets:clean assets:precompile && \
-    chmod g=u /app/.env.example /app/Gemfile.lock /app/config/ /app/tmp/
+RUN npm install --production
+
+RUN APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true bundle exec bootsnap precompile --gemfile app/ lib/ config/
+RUN APP_SECRET_TOKEN=secret DATABASE_ADAPTER=mysql2 ON_HEROKU=true bundle exec rake assets:clean assets:precompile
 
 EXPOSE 3000
 
-COPY ["docker/scripts/setup_env", "docker/single-process/scripts/init", "/scripts/"]
+COPY ["docker/scripts/setup_env", "docker/scripts/smokescreen", "docker/single-process/scripts/init", "/scripts/"]
 CMD ["/scripts/init"]
-
-USER 1001

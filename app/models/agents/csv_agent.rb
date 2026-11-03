@@ -1,3 +1,5 @@
+require 'csv'
+
 module Agents
   class CsvAgent < Agent
     include FormConfigurable
@@ -12,15 +14,18 @@ module Agents
         'separator' => ',',
         'use_fields' => '',
         'output' => 'event_per_row',
-        'with_header' => 'true',
+        'with_header' => true,
         'data_path' => '$.data',
-        'data_key' => 'data'
+        'data_key' => 'data',
+        'require_signed_file_pointer' => true
       }
     end
 
     description do
-      <<-MD
+      <<~MD
         The `CsvAgent` parses or serializes CSV data. When parsing, events can either be emitted for the entire CSV, or one per row.
+
+        JSONPath expressions use RFC 9535.  Set `use_legacy_jsonpath` to `true` to retain legacy JSONPath syntax and behavior.
 
         Set `mode` to `parse` to parse CSV from incoming event, when set to `serialize` the agent serilizes the data of events to CSV.
 
@@ -40,7 +45,7 @@ module Agents
 
         #{receiving_file_handling_agent_description}
 
-        When receiving the CSV data in a regular event use [JSONPath](http://goessner.net/articles/JsonPath/) to select the path in `data_path`. `data_path` is only used when the received event does not contain a 'file pointer'.
+        When receiving the CSV data in a regular event use [JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html) to select the path in `data_path`. `data_path` is only used when the received event does not contain a 'file pointer'.
 
         ### Serializing
 
@@ -48,42 +53,60 @@ module Agents
 
         Set `with_header` to `true` to include a field header in the CSV.
 
-        Use [JSONPath](http://goessner.net/articles/JsonPath/) in `data_path` to select with part of the received events should be serialized.
+        Use [JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html) in `data_path` to select with part of the received events should be serialized.
       MD
     end
 
     event_description do
-      "Events will looks like this:\n\n    %s" % if interpolated['mode'] == 'parse'
-        rows = if boolify(interpolated['with_header'])
-          [{'column' => 'row1 value1', 'column2' => 'row1 value2'}, {'column' => 'row2 value3', 'column2' => 'row2 value4'}]
+      data =
+        if interpolated['mode'] == 'parse'
+          rows =
+            if boolify(interpolated['with_header'])
+              [
+                { 'column' => 'row1 value1', 'column2' => 'row1 value2' },
+                { 'column' => 'row2 value3', 'column2' => 'row2 value4' },
+              ]
+            else
+              [
+                ['row1 value1', 'row1 value2'],
+                ['row2 value1', 'row2 value2'],
+              ]
+            end
+          if interpolated['output'] == 'event_per_row'
+            rows[0]
+          else
+            rows
+          end
         else
-          [['row1 value1', 'row1 value2'], ['row2 value1', 'row2 value2']]
+          <<~EOS
+            "generated","csv","data"
+            "column1","column2","column3"
+          EOS
         end
-        if interpolated['output'] == 'event_per_row'
-          Utils.pretty_print(interpolated['data_key'] => rows[0])
-        else
-          Utils.pretty_print(interpolated['data_key'] => rows)
-        end
-      else
-        Utils.pretty_print(interpolated['data_key'] => '"generated","csv","data"' + "\n" + '"column1","column2","column3"')
-      end
+
+      "Events will looks like this:\n\n    " +
+        Utils.pretty_print({
+          interpolated['data_key'] => data
+        })
     end
 
-    form_configurable :mode, type: :array, values: %w(parse serialize)
+    form_configurable :mode, type: :array, values: %w[parse serialize]
     form_configurable :separator, type: :string
     form_configurable :data_key, type: :string
     form_configurable :with_header, type: :boolean
     form_configurable :use_fields, type: :string
-    form_configurable :output, type: :array, values: %w(event_per_row event_per_file)
+    form_configurable :output, type: :array, values: %w[event_per_row event_per_file]
     form_configurable :data_path, type: :string
+    form_configurable :require_signed_file_pointer, type: :boolean
 
     def validate_options
-      if options['with_header'].blank? || ![true, false].include?(boolify(options['with_header']))
+      if !option_provided?(options['with_header']) || ![true, false].include?(boolify(options['with_header']))
         errors.add(:base, "The 'with_header' options is required and must be set to 'true' or 'false'")
       end
       if options['mode'] == 'serialize' && options['data_path'].blank?
         errors.add(:base, "When mode is set to serialize data_path has to be present.")
       end
+      validate_require_signed_file_pointer_options!
     end
 
     def working?
@@ -100,27 +123,28 @@ module Agents
     end
 
     private
+
     def serialize(incoming_events)
       mo = interpolated(incoming_events.first)
       rows = rows_from_events(incoming_events, mo)
-      csv = CSV.generate(col_sep: separator(mo), force_quotes: true ) do |csv|
+      csv = CSV.generate(col_sep: separator(mo), force_quotes: true) do |csv|
         if boolify(mo['with_header']) && rows.first.is_a?(Hash)
-          if mo['use_fields'].present?
-            csv << extract_options(mo)
-          else
-            csv << rows.first.keys
-          end
+          csv << if mo['use_fields'].present?
+                   extract_options(mo)
+                 else
+                   rows.first.keys
+                 end
         end
         rows.each do |data|
-          if data.is_a?(Hash)
-            if mo['use_fields'].present?
-              csv << data.extract!(*extract_options(mo)).values
-            else
-              csv << data.values
-            end
-          else
-            csv << data
-          end
+          csv << if data.is_a?(Hash)
+                   if mo['use_fields'].present?
+                     data.extract!(*extract_options(mo)).values
+                   else
+                     data.values
+                   end
+                 else
+                   data
+                 end
         end
       end
       create_event payload: { mo['data_key'] => csv }
@@ -129,7 +153,7 @@ module Agents
     def rows_from_events(incoming_events, mo)
       [].tap do |rows|
         incoming_events.each do |event|
-          data = Utils.value_at(event.payload, mo['data_path'])
+          data = value_at(event.payload, mo['data_path'])
           if data.is_a?(Array) && (data[0].is_a?(Array) || data[0].is_a?(Hash))
             data.each { |row| rows << row }
           else
@@ -142,7 +166,8 @@ module Agents
     def parse(incoming_events)
       incoming_events.each do |event|
         mo = interpolated(event)
-        next unless io = local_get_io(event)
+        io = local_get_io(event) or next
+
         if mo['output'] == 'event_per_row'
           parse_csv(io, mo) do |payload|
             create_event payload: { mo['data_key'] => payload }
@@ -154,11 +179,8 @@ module Agents
     end
 
     def local_get_io(event)
-      if io = get_io(event)
-        io
-      else
-        Utils.value_at(event.payload, interpolated['data_path'])
-      end
+      get_io(event) or
+        value_at(event.payload, interpolated['data_path'])
     end
 
     def parse_csv_options(mo)

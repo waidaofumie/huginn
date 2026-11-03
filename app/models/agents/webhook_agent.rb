@@ -6,22 +6,24 @@ module Agents
     cannot_be_scheduled!
     cannot_receive_events!
 
-    description do <<-MD
-      The Webhook Agent will create events by receiving webhooks from any source. In order to create events with this agent, make a POST request to:
+    description do
+      <<~MD
+        The Webhook Agent will create events by receiving webhooks from any source. In order to create events with this agent, make a POST request to:
 
-      ```
-         https://#{ENV['DOMAIN']}/users/#{user.id}/web_requests/#{id || ':id'}/#{options['secret'] || ':secret'}
-      ```
+        ```
+        https://#{ENV['DOMAIN']}/users/#{user.id}/web_requests/#{id || ':id'}/#{options['secret'] || ':secret'}
+        ```
 
-      #{'The placeholder symbols above will be replaced by their values once the agent is saved.' unless id}
+        #{'The placeholder symbols above will be replaced by their values once the agent is saved.' unless id}
 
-      Options:
+        Options:
 
+        * `use_legacy_jsonpath` - Set to `true` to retain legacy JSONPath syntax and behavior.  Otherwise, JSONPath expressions use RFC 9535.
         * `secret` - A token that the host will provide for authentication.
         * `expected_receive_period_in_days` - How often you expect to receive
           events this way. Used to determine if the agent is working.
         * `payload_path` - JSONPath of the attribute in the POST body to be
-          used as the Event payload.  Set to `.` to return the entire message.
+          used as the Event payload.  Set to `$` to return the entire message.
           If `payload_path` points to an array, Events will be created for each element.
         * `event_headers` - Comma-separated list of HTTP headers your agent will include in the payload.
         * `event_headers_key` - The key to use to store all the headers received
@@ -38,16 +40,17 @@ module Agents
     end
 
     event_description do
-      <<-MD
+      <<~MD
         The event payload is based on the value of the `payload_path` option,
         which is set to `#{interpolated['payload_path']}`.
       MD
     end
 
     def default_options
-      { "secret" => "supersecretstring",
+      {
+        "secret" => SecureRandom.uuid,
         "expected_receive_period_in_days" => 1,
-        "payload_path" => "some_key",
+        "payload_path" => "$",
         "event_headers" => "",
         "event_headers_key" => "headers",
         "score_threshold" => 0.5
@@ -97,7 +100,7 @@ module Agents
         begin
           response = faraday.post('https://www.google.com/recaptcha/api/siteverify',
                                   parameters)
-        rescue => e
+        rescue StandardError => e
           error "Verification failed: #{e.message}"
           return ["Not Authorized", 401]
         end
@@ -117,9 +120,17 @@ module Agents
       end
 
       if interpolated['response_headers'].presence
-        [interpolated(params)['response'] || 'Event Created', code, "text/plain", interpolated['response_headers'].presence]
+        [
+          interpolated(params)['response'] || 'Event Created',
+          code,
+          "text/plain",
+          interpolated['response_headers'].presence
+        ]
       else
-        [interpolated(params)['response'] || 'Event Created', code]
+        [
+          interpolated(params)['response'] || 'Event Created',
+          code
+        ]
       end
     end
 
@@ -144,7 +155,7 @@ module Agents
     end
 
     def payload_for(params)
-      Utils.value_at(params, interpolated['payload_path']) || {}
+      value_at(params, interpolated['payload_path']) || {}
     end
   end
 end

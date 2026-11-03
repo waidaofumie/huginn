@@ -13,7 +13,7 @@ module Agents
     end
 
     description do
-      <<-MD
+      <<~MD
         The LocalFileAgent can watch a file/directory for changes or emit an event for every file in that directory. When receiving an event it writes the received data into a file.
 
         `mode` determines if the agent is emitting events for (changed) files or writing received event data to disk.
@@ -41,36 +41,37 @@ module Agents
     end
 
     event_description do
-      "Events will looks like this:\n\n    %s" % if boolify(interpolated['watch'])
-        Utils.pretty_print(
-          "file_pointer" => {
-            "file" => "/tmp/test/filename",
-            "agent_id" => id
-          },
-          "event_type" => "modified/added/removed"
-        )
-      else
-        Utils.pretty_print(
-          "file_pointer" => {
-            "file" => "/tmp/test/filename",
-            "agent_id" => id
-          }
-        )
-      end
+      "Events will looks like this:\n\n    " +
+        if boolify(interpolated['watch'])
+          Utils.pretty_print(
+            "file_pointer" => {
+              "file" => "/tmp/test/filename",
+              "agent_id" => id
+            },
+            "event_type" => "modified/added/removed"
+          )
+        else
+          Utils.pretty_print(
+            "file_pointer" => {
+              "file" => "/tmp/test/filename",
+              "agent_id" => id
+            }
+          )
+        end
     end
 
     def default_options
       {
         'mode' => 'read',
-        'watch' => 'true',
-        'append' => 'false',
+        'watch' => true,
+        'append' => false,
         'path' => "",
         'data' => '{{ data }}'
       }
     end
 
-    form_configurable :mode, type: :array, values: %w(read write)
-    form_configurable :watch, type: :array, values: %w(true false)
+    form_configurable :mode, type: :array, values: %w[read write]
+    form_configurable :watch, type: :boolean
     form_configurable :path, type: :string
     form_configurable :append, type: :boolean
     form_configurable :data, type: :string
@@ -79,10 +80,10 @@ module Agents
       if options['mode'].blank? || !['read', 'write'].include?(options['mode'])
         errors.add(:base, "The 'mode' option is required and must be set to 'read' or 'write'")
       end
-      if options['watch'].blank? || ![true, false].include?(boolify(options['watch']))
+      if !option_provided?(options['watch']) || ![true, false].include?(boolify(options['watch']))
         errors.add(:base, "The 'watch' option is required and must be set to 'true' or 'false'")
       end
-      if options['append'].blank? || ![true, false].include?(boolify(options['append']))
+      if !option_provided?(options['append']) || ![true, false].include?(boolify(options['append']))
         errors.add(:base, "The 'append' option is required and must be set to 'true' or 'false'")
       end
       if options['path'].blank?
@@ -98,6 +99,7 @@ module Agents
     def check
       return if interpolated['mode'] != 'read' || boolify(interpolated['watch']) || !should_run?
       return unless check_path_existance(true)
+
       if File.directory?(expanded_path)
         Dir.glob(File.join(expanded_path, '*')).select { |f| File.file?(f) }
       else
@@ -109,11 +111,14 @@ module Agents
 
     def receive(incoming_events)
       return if interpolated['mode'] != 'write' || !should_run?
+
       incoming_events.each do |event|
         mo = interpolated(event)
-        File.open(File.expand_path(mo['path']), boolify(mo['append']) ? 'a' : 'w') do |file|
+        expanded_path = File.expand_path(mo['path'])
+        File.open(expanded_path, boolify(mo['append']) ? 'a' : 'w') do |file|
           file.write(mo['data'])
         end
+        create_event payload: get_file_pointer(expanded_path)
       end
     end
 
@@ -130,6 +135,8 @@ module Agents
     end
 
     def get_io(file)
+      return unless should_run?
+
       File.open(file, 'r')
     end
 
@@ -151,7 +158,8 @@ module Agents
     class Worker < LongRunnable::Worker
       def setup
         require 'listen'
-        @listener = Listen.to(*listen_options, &method(:callback))
+        path, options = listen_options
+        @listener = Listen.to(path, **options, &method(:callback))
       end
 
       def run
@@ -169,20 +177,28 @@ module Agents
 
       def callback(*changes)
         AgentRunner.with_connection do
-          changes.zip([:modified, :added, :removed]).each do |files, event_type|
-            files.each do |file|
-              agent.create_event payload: agent.get_file_pointer(file).merge(event_type: event_type)
+          Agent.with_execution_lock(agent.id) do |locked_agent|
+            changes.zip([:modified, :added, :removed]).each do |files, event_type|
+              files.each do |file|
+                locked_agent.create_event payload: locked_agent.get_file_pointer(file).merge(event_type:)
+              end
             end
+            locked_agent.touch(:last_check_at)
           end
-          agent.touch(:last_check_at)
         end
       end
 
       def listen_options
         if File.directory?(agent.expanded_path)
-          [agent.expanded_path, ignore!: [] ]
+          [
+            agent.expanded_path,
+            ignore!: []
+          ]
         else
-          [File.dirname(agent.expanded_path), { ignore!: [], only: /\A#{Regexp.escape(File.basename(agent.expanded_path))}\z/ } ]
+          [
+            File.dirname(agent.expanded_path),
+            ignore!: [], only: /\A#{Regexp.escape(File.basename(agent.expanded_path))}\z/
+          ]
         end
       end
     end

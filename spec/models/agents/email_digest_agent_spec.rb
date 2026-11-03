@@ -65,12 +65,12 @@ describe Agents::EmailDigestAgent do
 
       expect(ActionMailer::Base.deliveries.last.to).to eq(["bob@example.com"])
       expect(ActionMailer::Base.deliveries.last.subject).to eq("something interesting")
-      expect(get_message_part(ActionMailer::Base.deliveries.last, /plain/).strip).to eq("Event\r\n  data: Something you should know about\r\n\r\nFoo\r\n  bar: 2\r\n  url: http://google.com\r\n\r\nhi\r\n  woah: there\r\n\r\nEvent\r\n  test: 2")
+      expect(get_message_part(ActionMailer::Base.deliveries.last, /plain/).strip).to eq("Event\n  data: Something you should know about\n\nFoo\n  bar: 2\n  url: http://google.com\n\nhi\n  woah: there\n\nEvent\n  test: 2")
       expect(@checker.reload.memory[:events]).to be_empty
     end
 
     it "logs and re-raises mailer errors" do
-      mock(SystemMailer).send_message(anything) { raise Net::SMTPAuthenticationError.new("Wrong password") }
+      expect(SystemMailer).to receive(:send_message).with(anything) { raise Net::SMTPAuthenticationError.new("Wrong password") }
 
       @checker.memory[:events] = [1]
       @checker.save!
@@ -84,8 +84,7 @@ describe Agents::EmailDigestAgent do
     end
 
     it "can receive complex events and send them on" do
-      stub_request(:any, /darksky/).to_return(:body => File.read(Rails.root.join("spec/data_fixtures/weather.json")), :status => 200)
-      stub.any_instance_of(Agents::WeatherAgent).is_tomorrow?(anything) { true }
+      stub_request(:any, /pirateweather/).to_return(:body => File.read(Rails.root.join("spec/data_fixtures/weather.json")), :status => 200)
       @checker.sources << agents(:bob_weather_agent)
 
       Agent.async_check(agents(:bob_weather_agent).id)

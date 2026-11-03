@@ -5,7 +5,7 @@
 
 This guide is long because it covers many cases and includes all commands you need.
 
-This installation guide was created for and tested on **Debian/Ubuntu** operating systems. Please read [doc/install/requirements.md](./requirements.md) for hardware and operating system requirements.
+This installation guide is written for **Debian/Ubuntu** operating systems and is maintained on a best-effort basis.  Some package names may differ on your release.  Unless you need a source installation, the [Docker images](../docker/install.md) are the recommended way to run Huginn.  Please read [the requirements](./requirements.md) for hardware and operating system requirements.
 
 This is the official installation guide to set up a production server. To set up a **development installation** or for many other installation options please see [the getting started section of the readme](https://github.com/huginn/huginn#getting-started).
 
@@ -46,7 +46,7 @@ up-to-date and install it.
 
 Install the required packages (needed to compile Ruby and native extensions to Ruby gems):
 
-    sudo apt-get install -y runit build-essential git zlib1g-dev libyaml-dev libssl-dev libgdbm-dev libreadline-dev libncurses5-dev libffi-dev curl openssh-server checkinstall libxml2-dev libxslt-dev libcurl4-openssl-dev libicu-dev logrotate python-docutils pkg-config cmake nodejs graphviz jq
+    sudo apt-get install -y runit build-essential git zlib1g-dev libyaml-dev libssl-dev libgdbm-dev libreadline-dev libncurses5-dev libffi-dev curl openssh-server checkinstall libxml2-dev libxslt-dev libcurl4-openssl-dev libicu-dev logrotate pkg-config cmake nodejs graphviz jq shared-mime-info
 
 
 ### Debian Stretch
@@ -72,34 +72,41 @@ Remove the old Ruby versions if present:
 Download Ruby and compile it:
 
     mkdir /tmp/ruby && cd /tmp/ruby
-    curl -L --progress-bar https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.5.tar.bz2 | tar xj
-    cd ruby-2.6.5
+    curl -L --progress-bar https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.9.tar.xz | tar xJ
+    cd ruby-4.0.9
     ./configure --disable-install-rdoc
     make -j`nproc`
     sudo make install
 
-Install the bundler and foreman gems:
+Install foreman:
 
-    sudo gem install rake foreman --no-document
-    sudo gem install bundler -v '< 2' --no-document
+    sudo gem install foreman --no-document
 
-Update rubygems:
+## 3. NPM
 
-    sudo gem update --system --no-document
+The NPM package manager is required for some frontend dependencies, such as Font Awesome.
 
-## 3. System Users
+    sudo apt-get install npm
+
+## 4. System Users
 
 Create a user for Huginn:
 
     sudo adduser --disabled-login --gecos 'Huginn' huginn
 
-## 4. Database
+## 5. Database
+
+### MySQL / MariaDB
 
 Install the database packages
 
     sudo apt-get install -y mysql-server mysql-client libmysqlclient-dev
 
 For Debian Stretch, replace `libmysqlclient-dev` with `default-libmysqlclient-dev`. See the [additional notes section](#additional-notes) for more information.
+
+For Debian BullsEye:
+
+    sudo apt-get install -y default-mysql-server default-mysql-client default-libmysqlclient-dev
 
 Check the installed MySQL version (remember if its >= 5.5.3 for the `.env` configuration done later):
 
@@ -128,11 +135,17 @@ Ensure you can use the InnoDB engine which is necessary to support long indexes
     # If this fails, check your MySQL config files (e.g. `/etc/mysql/*.cnf`, `/etc/mysql/conf.d/*`)
     # for the setting "innodb = off"
 
+If you plan to enable `NATIVE_JSON_COLUMNS` in `.env`, raise `sort_buffer_size` in your MySQL config (e.g. `/etc/mysql/conf.d/huginn.cnf`).  Sorting rows that contain JSON columns can exceed the 256K default, making queries fail with "Out of sort memory" on MySQL 8:
+
+    [mysqld]
+    sort_buffer_size = 4M
+
 Grant the Huginn user necessary permissions on the database
 
     mysql> GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, INDEX, ALTER, LOCK TABLES ON `huginn_production`.* TO 'huginn'@'localhost';
 
 Use the flush privileges command to save the new permissions
+
     mysql> FLUSH PRIVILEGES;
 
 Quit the database session
@@ -149,8 +162,29 @@ You should now see `ERROR 1049 (42000): Unknown database 'huginn_production'` wh
 
 You are done installing the database and can go back to the rest of the installation.
 
+### PostgreSQL
 
-## 5. Huginn
+Install the database packages
+
+    sudo apt-get install -y postgresql libpq-dev
+
+Create a user for Huginn and set its database connection password. If you want the user to be able to create the database, add `-d`
+
+    sudo -u postgres -H createuser -P huginn
+
+Create a database
+
+    sudo -u postgres -H createdb -O huginn -T template0 huginn_production
+
+Try connecting to the new database with the new user
+
+    sudo -u huginn psql -h localhost -W huginn_production
+
+    # Type the password you set earlier
+
+You should now be greeted by the `psql` interactive client and be connected to the `huginn_production` database. Quit the database session with `\q` or `CTRL-D`
+
+## 6. Huginn
 
 ### Clone the Source
 
@@ -178,9 +212,6 @@ You are done installing the database and can go back to the rest of the installa
     sudo chmod -R u+rwX tmp/
     sudo -u huginn -H chmod o-rwx .env
 
-    # Copy the example Unicorn config
-    sudo -u huginn -H cp config/unicorn.rb.example config/unicorn.rb
-
 ### Configure it
 
     # Update Huginn config file and follow the instructions
@@ -189,7 +220,6 @@ You are done installing the database and can go back to the rest of the installa
 If you are using a local MySQL server the database configuration should look like this (use the password of the huginn MySQL user you created earlier):
 
     DATABASE_ADAPTER=mysql2
-    DATABASE_RECONNECT=true
     DATABASE_NAME=huginn_production
     DATABASE_POOL=20
     DATABASE_USERNAME=huginn
@@ -204,29 +234,42 @@ If you are using a local MySQL server the database configuration should look lik
     # database can hold 4-byte UTF-8 characters like emoji.
     #DATABASE_ENCODING=utf8mb4
 
+If you are using a local PostgreSQL server the database configuration should look like this (use the password of the huginn PostgreSQL user you created earlier):
+
+    DATABASE_ADAPTER=postgresql
+    DATABASE_NAME=huginn_production
+    DATABASE_POOL=20
+    DATABASE_USERNAME=huginn
+    DATABASE_PASSWORD='$password'
+    DATABASE_HOST=localhost
+    DATABASE_PORT=5432
+
+    DATABASE_ENCODING=utf8
+
 **Important**: Uncomment the RAILS_ENV setting to run Huginn in the production rails environment
 
     RAILS_ENV=production
 
-Change the Unicorn config if needed, the [requirements.md](./requirements.md#unicorn-workers) has a section explaining the suggested amount of unicorn workers:
+Review `config/puma.rb` if needed.  The [requirements.md](./requirements.md#puma-workers) has a section explaining the suggested amount of Puma workers:
 
     # Increase the amount of workers if you expect to have a high load instance.
-    # 2 are enough for most use cases, if the server has less then 2GB of RAM
+    # 2 are enough for most use cases, if the server has less than 2GB of RAM
     # decrease the worker amount to 1
-    sudo -u huginn -H editor config/unicorn.rb
+    sudo -u huginn -H editor config/puma.rb
 
+You can also tune Puma through `.env`.  `WEB_CONCURRENCY` controls the number of workers, `RAILS_MAX_THREADS` controls the thread count per worker, and `PUMA_FORK_WORKER_AFTER_REQUESTS` enables Puma's experimental [`fork_worker`](https://puma.io/puma/file.fork_worker.html) mode to periodically refork Puma workers after a given number of requests when running with multiple workers.
 
-**Important Note:** Make sure to edit both `.env` and `unicorn.rb` to match your setup.
+**Important Note:** Make sure `.env` matches your setup.  If you customize `config/puma.rb`, keep that change in your deployed branch as well.
 
 **Note:** If you want to use HTTPS, which is what we recommend, see [Using HTTPS](#using-https) for the additional steps.
 
-**Note:** For configuration changes after finishing the initial installation you have to re-export (see [Install Init Script](https://github.com/huginn/huginn/blob/master/doc/manual/installation.md#install-init-script)) the init script every time you change `.env`, `unicorn.rb` or your `Procfile`!
+**Note:** For configuration changes after finishing the initial installation you have to re-export (see [Install Init Script](https://github.com/huginn/huginn/blob/master/doc/manual/installation.md#install-init-script)) the init script every time you change `.env` or your `Procfile`.  If you change `config/puma.rb`, re-export as well.
 
 ### Install Gems
 
-**Note:** As of bundler 1.5.2, you can invoke `bundle install -jN` (where `N` the number of your processor cores) and enjoy parallel gem installation with measurable difference in completion time (~60% faster). Check the number of your cores with `nproc`. For more information check this [post](http://robots.thoughtbot.com/parallel-gem-installing-using-bundler). First make sure you have bundler >= 1.5.2 (run `bundle -v`) as it addresses some [issues](https://devcenter.heroku.com/changelog-items/411) that were [fixed](https://github.com/bundler/bundler/pull/2817) in 1.5.2.
-
-    sudo -u huginn -H bundle install --deployment --without development test
+    bundle config set --local deployment 'true'
+    bundle config set --local without 'development test'
+    sudo -u huginn -H bundle install
 
 ### Initialize Database
 
@@ -236,53 +279,52 @@ Change the Unicorn config if needed, the [requirements.md](./requirements.md#uni
     # Migrate to the latest version
     sudo -u huginn -H bundle exec rake db:migrate RAILS_ENV=production
 
-    # Create admin user and example agents using the default admin/password login
-    sudo -u huginn -H bundle exec rake db:seed RAILS_ENV=production SEED_USERNAME=admin SEED_PASSWORD=password
+    # Create admin user and example agents
+    sudo -u huginn -H bundle exec rake db:seed RAILS_ENV=production SEED_USERNAME=admin SEED_PASSWORD=your-password
 
 When done you see `See the Huginn Wiki for more Agent examples!  https://github.com/huginn/huginn/wiki`
 
-**Note:** This will create an initial user, you can change the username and password by supplying it in environmental variables `SEED_USERNAME` and `SEED_PASSWORD` as seen above. If you don't change the password (and it is set to the default one) please wait with exposing Huginn to the public internet until the installation is done and you've logged into the server and changed your password.
+**Note:** This will create an initial user, you can change the username and password by supplying it in environmental variables `SEED_USERNAME` and `SEED_PASSWORD` as seen above. If you leave out `SEED_PASSWORD`, a random password is generated and printed once by the command; note it down.
 
 ### Compile Assets
 
+    sudo -u huginn -H npm install
     sudo -u huginn -H bundle exec rake assets:precompile RAILS_ENV=production
 
 ### Install Init Script
 
-Huginn uses [foreman](http://ddollar.github.io/foreman/) to generate the init scripts based on a `Procfile`
+Huginn uses [foreman](http://ddollar.github.io/foreman/) to generate the init scripts based on a `Procfile`.
 
-Edit the [`Procfile`](https://github.com/huginn/huginn/blob/master/Procfile) and choose one of the suggested versions for production
+For the default threaded worker setup, the checked-in [`Procfile`](https://github.com/huginn/huginn/blob/master/Procfile) already works in production once `RAILS_ENV=production` is set.
+
+Edit the `Procfile` only if you want to switch to one of the alternate process layouts:
 
     sudo -u huginn -H editor Procfile
 
-Comment out (disable) [these two lines](https://github.com/huginn/huginn/blob/master/Procfile#L6-L7)
-
-    web: bundle exec rails server -p ${PORT-3000} -b ${IP-0.0.0.0}
-    jobs: bundle exec rails runner bin/threaded.rb
-
-Enable (remove the comment) [from these lines](https://github.com/huginn/huginn/blob/master/Procfile#L24-L25) or [those](https://github.com/huginn/huginn/blob/master/Procfile#L28-L31)
-
-    # web: bundle exec unicorn -c config/unicorn.rb
-    # jobs: bundle exec rails runner bin/threaded.rb
+For example, you can enable the separate worker layout by uncommenting the corresponding `schedule`, `twitter` and `dj` lines.
 
 **Note:** Ensure you have no leading spaces before `web:` or `jobs:` in your `Procfile` file.
+
+If you use a directory other than `/home/huginn/huginn/` for the app, change the location of the `runit` logfile in `lib/tasks/production.rake`, for example:
+    run('foreman export runit -a huginn -l /opt/huginn/log /etc/service')
 
 Export the init scripts:
 
     sudo bundle exec rake production:export
 
-**Note:** You have to re-export the init script every time you change the configuration in `.env` or your `Procfile`!
+**Note:** You have to re-export the init script every time you change the configuration in `.env` or your `Procfile`.  If you change `config/puma.rb`, re-export as well.
 
 ### Setup Logrotate
 
     sudo cp deployment/logrotate/huginn /etc/logrotate.d/huginn
 
+Change the location of the log directory if you have chosen to log to a different directory other than `/home/huginn/huginn/log/`
 
 ### Ensure Your Huginn Instance Is Running
 
     sudo bundle exec rake production:status
 
-## 6. Nginx
+## 7. Nginx
 
 **Note:** Nginx is the officially supported web server for Huginn. If you cannot or do not want to use Nginx as your web server, the wiki has a page on how to configure [apache](https://github.com/huginn/huginn/wiki/Apache-Huginn-configuration).
 
@@ -328,7 +370,7 @@ You should receive `syntax is okay` and `test is successful` messages. If you re
 Visit YOUR_SERVER in your web browser for your first Huginn login. The setup has created a default admin account for you. You can use it to log in:
 
     admin (or your SEED_USERNAME)
-    password (or your SEED_PASSWORD)
+    your SEED_PASSWORD (or the generated password printed by rake db:seed)
 
 
 **Enjoy!** :sparkles: :star: :fireworks:
@@ -387,18 +429,18 @@ This file should be empty, it is the first place to look because `nginx` is the 
 
 Common problems:
 
-* `connect() to unix:/home/huginn/huginn/tmp/sockets/unicorn.socket failed`: The Unicorn application server is not running, ensure you uncommented one of the example configuration below the `PRODUCTION` label in your [Profile](#install-init-script) and the unicorn config file (`/home/huginn/huginn/config/unicorn.rb`) exists.
+* `connect() to unix:/home/huginn/huginn/tmp/sockets/puma.sock failed`: The Puma application server is not running.  Ensure the `web:` process is enabled in your [Procfile](#install-init-script) and that `/home/huginn/huginn/config/puma.rb` exists.
 * `138 open() "/home/huginn/huginn/public/..." failed (13: Permission denied)`: The `/home/huginn/huginn/public` directory needs to be readable by the nginx user (which is per default `www-data`)
 
 
-#### Unicorn log `/home/huginn/huginn/log/unicorn.log`
+#### Puma logs `/home/huginn/huginn/log/stdout.log` and `/home/huginn/huginn/log/stderr.log`
 
 Should only contain HTTP request log entries like: `10.0.2.2 - - [18/Aug/2015:21:15:12 +0000] "GET / HTTP/1.0" 200 - 0.0110`
 
 If you see ruby exception backtraces or other error messages the problem could be one of the following:
 
-* The configuration file `/home/huginn/huginn/config/unicorn.rb` does not exist
-* Gem dependencies where not [installed](#install-gems)
+* The configuration file `/home/huginn/huginn/config/puma.rb` does not exist
+* Gem dependencies were not [installed](#install-gems)
 
 #### Rails Application log `/home/huginn/huginn/log/production.log`
 
@@ -441,10 +483,12 @@ MySQL installations (>= 5.7.26) on Ubuntu use the UNIX `auth_socket` plugin by d
 
 Once in the MySQL shell, run the following command to set the password for the root user by replacing `new-password` with a password of your choice
 
-    ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'new-password';
+    ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'new-password';
+
+Use this authentication plugin with MySQL 8.0 and 8.4.  MySQL 8.4 disables `mysql_native_password` by default.
 
 After the change has been made, exit the MySQL shell with `\q`. 
 
-For the change to propogate, restart the MySQL server
+For the change to propagate, restart the MySQL server
 
     sudo service mysql restart

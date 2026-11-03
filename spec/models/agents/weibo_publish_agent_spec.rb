@@ -4,13 +4,10 @@ require 'rails_helper'
 describe Agents::WeiboPublishAgent do
   before do
     @opts = {
-      :uid => "1234567",
       :expected_update_period_in_days => "2",
-      :app_key => "---",
-      :app_secret => "---",
       :access_token => "---",
-      :message_path => "text",
-      :pic_path => "pic"
+      :message_path => "$.text",
+      :pic_path => "$.pic"
     }
 
     @checker = Agents::WeiboPublishAgent.new(:name => "Weibo Publisher", :options => @opts)
@@ -24,9 +21,9 @@ describe Agents::WeiboPublishAgent do
 
     @sent_messages = []
     @sent_pictures = []
-    stub.any_instance_of(Agents::WeiboPublishAgent).publish_tweet { |message| @sent_messages << message}
-    stub.any_instance_of(Agents::WeiboPublishAgent).publish_tweet_with_pic { |message, picture| @sent_pictures << picture}
-    stub.any_instance_of(Agents::WeiboPublishAgent).sleep
+    allow_any_instance_of(Agents::WeiboPublishAgent).to receive(:publish_tweet) { |agent, message| @sent_messages << message}
+    allow_any_instance_of(Agents::WeiboPublishAgent).to receive(:publish_tweet_with_pic) { |agent, message, picture| @sent_pictures << picture}
+    allow_any_instance_of(Agents::WeiboPublishAgent).to receive(:sleep)
   end
 
   describe '#receive' do
@@ -91,6 +88,20 @@ describe Agents::WeiboPublishAgent do
       expect(@sent_pictures.count).to eq(1)
       expect(@checker.events.count).to eq(1)
     end
+
+    it 'should not treat file urls as valid images' do
+      event = Event.new
+      event.agent = agents(:bob_weather_agent)
+      event.payload = {:text => 'whatever', :pic => 'file:///etc/passwd'}
+      event.save!
+
+      expect(@checker.send(:valid_image?, 'file:///etc/passwd')).to be(false)
+
+      Agents::WeiboPublishAgent.async_receive(@checker.id, [event.id])
+      expect(@sent_messages.count).to eq(1)
+      expect(@sent_pictures.count).to eq(0)
+      expect(@checker.events.count).to eq(1)
+    end
   end
 
   describe '#working?' do
@@ -99,7 +110,7 @@ describe Agents::WeiboPublishAgent do
       Agents::WeiboPublishAgent.async_receive(@checker.id, [@event.id])
       expect(@checker.reload).to be_working # Just received events
       two_days_from_now = 2.days.from_now
-      stub(Time).now { two_days_from_now }
+      allow(Time).to receive(:now) { two_days_from_now }
       expect(@checker.reload).not_to be_working # More time has passed than the expected receive period without any new events
     end
   end

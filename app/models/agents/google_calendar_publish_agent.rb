@@ -8,10 +8,10 @@ module Agents
 
     gem_dependency_check { defined?(Google) && defined?(Google::Apis::CalendarV3) }
 
-    description <<-MD
+    description <<~MD
       The Google Calendar Publish Agent creates events on your Google Calendar.
 
-      #{'## Include `google-api-client` in your Gemfile to use this Agent!' if dependencies_missing?}
+      #{'## Include `google-apis-calendar_v3` in your Gemfile to use this Agent!' if dependencies_missing?}
 
       This agent relies on service accounts, rather than oauth.
 
@@ -28,7 +28,7 @@ module Agents
       <pre><code>{
         "type": "service_account",
         "project_id": "huginn-123123",
-        "private_key_id": "6d6b476fc6ccdb31e0f171991e5528bb396ffbe4",
+        "private_key_id": "1234567890abcdef1234567890abcdef12345678",
         "private_key": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n",
         "client_email": "huginn-calendar@huginn-123123.iam.gserviceaccount.com",
         "client_id": "123123...123123",
@@ -73,19 +73,22 @@ module Agents
       }</code></pre>
     MD
 
-    event_description <<-MD
-      {
-        'success' => true,
-        'published_calendar_event' => {
-           ....
-        },
-        'agent_id' => 1234,
-        'event_id' => 3432
-      }
+    event_description <<~MD
+      Events look like:
+
+          {
+            'success' => true,
+            'published_calendar_event' => {
+               ....
+            },
+            'agent_id' => 1234,
+            'event_id' => 3432
+          }
     MD
 
     def validate_options
-      errors.add(:base, "expected_update_period_in_days is required") unless options['expected_update_period_in_days'].present?
+      errors.add(:base,
+                 "expected_update_period_in_days is required") unless options['expected_update_period_in_days'].present?
     end
 
     def working?
@@ -108,7 +111,6 @@ module Agents
       require 'google_calendar'
       incoming_events.each do |event|
         GoogleCalendar.open(interpolate_options(options, event), Rails.logger) do |calendar|
-
           cal_message = event.payload["message"]
           if cal_message["start"].present? && cal_message["start"]["dateTime"].present? && !cal_message["start"]["date_time"].present?
             cal_message["start"]["date_time"] = cal_message["start"].delete "dateTime"
@@ -118,11 +120,11 @@ module Agents
           end
 
           calendar_event = calendar.publish_as(
-                interpolated(event)['calendar_id'],
-                cal_message
-              )
+            interpolated(event)['calendar_id'],
+            cal_message
+          )
 
-          create_event :payload => {
+          create_event payload: {
             'success' => true,
             'published_calendar_event' => calendar_event,
             'agent_id' => event.agent_id,
@@ -133,4 +135,3 @@ module Agents
     end
   end
 end
-

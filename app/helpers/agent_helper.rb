@@ -1,5 +1,17 @@
 module AgentHelper
 
+  def agent_filter_option(text, value, label, count = nil)
+    content_tag :option, text, value: value,
+      selected: value.to_s == (params[:without_scenario].present? ? "none" : params[:scenario_id].to_s),
+      data: { label: String.new(label), count: count }
+  end
+
+  def agent_filter_service_label(service)
+    content_tag :span, class: "agent-filter-service btn-service service-#{service.provider}" do
+      safe_join([omniauth_provider_icon(service.provider), content_tag(:span, service.name)])
+    end
+  end
+
   def agent_show_view(agent)
     path = File.join('agents', 'agent_views', @agent.short_type.underscore, 'show')
     return self.controller.template_exists?(path, [], true) ? path : nil
@@ -91,7 +103,9 @@ module AgentHelper
 
   def agent_type_select_options
     Rails.cache.fetch('agent_type_select_options') do
-      [['Select an Agent Type', 'Agent', {title: ''}]] + Agent.types.map {|type| [agent_type_to_human(type.name), type, {title: h(Agent.build_for_type(type.name, User.new(id: 0), {}).html_description.lines.first.strip)}] }
+      types = Agent.types.map {|type| [agent_type_to_human(type.name), type, {title: h(Agent.build_for_type(type.name, User.new(id: 0), {}).html_description.lines.first.strip)}] }
+      types.sort_by! { |t| t[0] }
+      [['Select an Agent Type', 'Agent', {title: ''}]] + types
     end
   end
 

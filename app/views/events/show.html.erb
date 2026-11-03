@@ -22,8 +22,7 @@
 
       <% if @event.lat && @event.lng %>
         <% content_for :head do -%>
-<%= javascript_include_tag "https://maps.googleapis.com/maps/api/js?key=#{@event.agent.options[:api_key]}" %>
-<%= javascript_include_tag "map_marker" %>
+<%= location_map_head_tags(@event.agent.options[:api_key]) %>
         <% end -%>
 
         <p>
@@ -37,21 +36,17 @@
         <div id="map_canvas" style="width:400px; height:300px"></div>
 
         <script type="text/javascript">
-          var mapOptions = {
-            center: new google.maps.LatLng(<%= @event.lat %>, <%= @event.lng %>),
-            zoom:15,
-            mapTypeId:google.maps.MapTypeId.ROADMAP
-          };
-
-          var map = new google.maps.Map(document.getElementById("map_canvas"), mapOptions);
-
-          map_marker(map, <%= Utils.jsonify(@event.location) %>);
+          var loc = <%= Utils.jsonify(@event.location) %>;
+          var map = LocationMap.create(document.getElementById("map_canvas"), loc, 15);
+          map.addLocation(loc);
         </script>
       <% end %>
 
       <br />
       <div class="btn-group">
         <%= link_to icon_tag('glyphicon-chevron-left') + ' Back'.html_safe, filtered_agent_return_link || events_path, class: "btn btn-default" %>
+        <%= link_to icon_tag('glyphicon-refresh') + ' Re-emit', reemit_event_path(@event), method: :post, data: { confirm: 'Are you sure you want to duplicate this event and emit the new one now?' }, class: "btn btn-default" %>
+        <%= link_to icon_tag('glyphicon-remove', class: 'color-danger') + ' Delete', event_path(@event), method: :delete, data: { confirm: 'Are you sure?' }, class: "btn btn-default" %>
       </div>
     </div>
   </div>

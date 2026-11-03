@@ -4,7 +4,10 @@ shared_examples_for 'FileHandlingConsumer' do
   let(:event) { Event.new(user: @checker.user, payload: {'file_pointer' => {'file' => 'text.txt', 'agent_id' => @checker.id}}) }
 
   it 'returns a file pointer' do
-    expect(@checker.get_file_pointer('testfile')).to eq(file_pointer: { file: "testfile", agent_id: @checker.id})
+    file_pointer = @checker.get_file_pointer('testfile')[:file_pointer]
+
+    expect(file_pointer).to include(file: "testfile", agent_id: @checker.id)
+    expect(file_pointer[:signature]).to be_present
   end
 
   it 'get_io raises an exception when trying to access an agent of a different user' do
@@ -26,8 +29,7 @@ shared_examples_for 'FileHandlingConsumer' do
   end
 
   it '#get_upload_io returns a Faraday::UploadIO instance' do
-    io_mock = mock()
-    mock(@checker).get_io(event) { StringIO.new("testdata") }
+    expect(@checker).to receive(:get_io).with(event) { StringIO.new("testdata") }
 
     upload_io = @checker.get_upload_io(event)
     expect(upload_io).to be_a(Faraday::UploadIO)

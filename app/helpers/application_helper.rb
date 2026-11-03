@@ -1,14 +1,13 @@
 module ApplicationHelper
   def icon_tag(name, options = {})
-    if dom_class = options[:class]
-      dom_class = ' ' << dom_class
-    end
+    dom_class = options[:class]
 
     case name
     when /\Aglyphicon-/
-      "<span class='glyphicon #{name}#{dom_class}'></span>".html_safe
+      tag.span(class: token_list('glyphicon', name, dom_class))
     when /\Afa-/
-      "<i class='fa #{name}#{dom_class}'></i>".html_safe
+      style = 'fa-solid' unless /(?:\A| )fa-(?:solid|brands)(?: |\z)/.match?(dom_class)
+      tag.i(class: token_list(style, name, dom_class))
     else
       raise "Unrecognized icon name: #{name}"
     end
@@ -55,10 +54,10 @@ module ApplicationHelper
 
   def omniauth_provider_icon(provider)
     case provider.to_sym
-    when :twitter, :tumblr, :github, :dropbox
-      icon_tag("fa-#{provider}")
-    when :wunderlist
-      icon_tag("fa-list")
+    when :twitter, :tumblr, :github, :dropbox, :google, :threads
+      icon_tag("fa-#{provider}", class: 'fa-brands')
+    when :raindrop
+      icon_tag("fa-cloud")
     else
       icon_tag("fa-lock")
     end
@@ -90,6 +89,12 @@ module ApplicationHelper
   def load_ace_editor!
     unless content_for?(:ace_editor_script)
       content_for :ace_editor_script, javascript_include_tag('ace')
+    end
+  end
+
+  def load_json_editor!
+    unless content_for?(:json_editor_script)
+      content_for :json_editor_script, javascript_include_tag('json-editor-loader', type: 'module')
     end
   end
 

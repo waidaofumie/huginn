@@ -1,0 +1,30 @@
+name: Lockfile maintenance
+
+on:
+  schedule:
+    - cron: "0 0 * * 5" # Friday 09:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  maintenance:
+    uses: knu/lockfile-maintenance-action/.github/workflows/maintenance.yml@bfe008c400f3507b5e60a6090038d5cfb72261c8 # v2.2.0
+    with:
+      auth: oidc
+      files: |
+        /Gemfile.lock
+        /package-lock.json
+      minimum-release-age: 3 days
+      ruby-version: "4.0.9"
+      labels: dependencies,automerge
+
+  actions-lock:
+    uses: knu/lockfile-maintenance-action/.github/workflows/maintenance.yml@bfe008c400f3507b5e60a6090038d5cfb72261c8
+    with:
+      files: /.github/workflows/actions.lock
+      minimum-release-age: 3 days
+      branch: automation/actions-lock-maintenance
+      labels: dependencies,automerge

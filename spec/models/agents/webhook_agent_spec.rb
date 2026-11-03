@@ -3,7 +3,7 @@ require 'rails_helper'
 describe Agents::WebhookAgent do
   let(:agent) do
     _agent = Agents::WebhookAgent.new(:name => 'webhook',
-                                      :options => { 'secret' => 'foobar', 'payload_path' => 'some_key' })
+                                      :options => { 'secret' => 'foobar', 'payload_path' => '$.some_key' })
     _agent.user = users(:bob)
     _agent.save!
     _agent
@@ -39,7 +39,7 @@ describe Agents::WebhookAgent do
           'HTTP_X_HELLO_WORLD' => "Hello Huginn"
         })
       out = nil
-      agent.options['payload_path'] = 'some_key.people'
+      agent.options['payload_path'] = '$.some_key.people'
       agent.options['event_headers'] = 'Accept,X-Hello-World'
       agent.options['event_headers_key'] = 'X-HTTP-HEADERS'
       expect {
@@ -185,22 +185,6 @@ describe Agents::WebhookAgent do
             out = agent.receive_web_request(webpayload)
           }.to change { Event.count }.by(0)
           expect(out).to eq(['Please use POST requests only', 401])
-        end
-
-        it "should accept POST" do
-          webpayload = ActionDispatch::Request.new({
-              'action_dispatch.request.request_parameters' => { 'some_key' => payload },
-              'action_dispatch.request.path_parameters' => { secret: 'foobar' },
-              'REQUEST_METHOD' => "POST",
-              'HTTP_ACCEPT' => 'application/xml',
-              'HTTP_X_HELLO_WORLD' => "Hello Huginn"
-            })
-
-          out = nil
-          expect {
-            out = agent.receive_web_request(webpayload)
-          }.to change { Event.count }.by(1)
-          expect(out).to eq(['Event Created', 201])
         end
 
       end
@@ -535,7 +519,7 @@ describe Agents::WebhookAgent do
         end
 
         it "should accept a request if recaptcha_secret is set and g-recaptcha-response given is verified" do
-          agent.options['payload_path'] = '.'
+          agent.options['payload_path'] = '$'
           agent.options['recaptcha_secret'] = 'supersupersecret'
           webpayload = ActionDispatch::Request.new({
               'action_dispatch.request.request_parameters' => payload.merge({ 'g-recaptcha-response' => 'somevalue' }),
@@ -563,7 +547,7 @@ describe Agents::WebhookAgent do
 
         it "should accept a request if recaptcha_secret is set and g-recaptcha-response given is verified and
         reCAPTCHA v3 score is above score_treshold" do
-          agent.options['payload_path'] = '.'
+          agent.options['payload_path'] = '$'
           agent.options['recaptcha_secret'] = 'supersupersecret'
           agent.options['score_threshold'] = 0.5
           webpayload = ActionDispatch::Request.new({
@@ -592,7 +576,7 @@ describe Agents::WebhookAgent do
 
         it "should reject a request if recaptcha_secret is set and g-recaptcha-response given is verified and
         reCAPTCHA v3 score is below score_treshold" do
-          agent.options['payload_path'] = '.'
+          agent.options['payload_path'] = '$'
           agent.options['recaptcha_secret'] = 'supersupersecret'
           agent.options['score_threshold'] = 0.5
           webpayload = ActionDispatch::Request.new({

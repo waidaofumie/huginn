@@ -13,7 +13,7 @@ module Agents
     default_schedule "never"
 
     description do
-      <<-MD
+      <<~MD
         A Post Agent receives events from other agents (or runs periodically), merges those events with the [Liquid-interpolated](https://github.com/huginn/huginn/wiki/Formatting-Events-using-Liquid) contents of `payload`, and sends the results as POST (or GET) requests to a specified url.  To skip merging in the incoming event, but still send the interpolated payload, set `no_merge` to `true`.
 
         The `post_url` field must specify where you would like to send requests. Please include the URI scheme (`http` or `https`).
@@ -28,8 +28,7 @@ module Agents
 
         When `content_type` contains a [MIME](https://en.wikipedia.org/wiki/Media_type) type, and `payload` is a string, its interpolated value will be sent as a string in the HTTP request's body and the request's `Content-Type` HTTP header will be set to `content_type`. When `payload` is a string `no_merge` has to be set to `true`.
 
-        If `emit_events` is set to `true`, the server response will be emitted as an Event and can be fed to a WebsiteAgent for parsing (using its `data_from_event` and `type` options). No data processing
-        will be attempted by this Agent, so the Event's "body" value will always be raw text.
+        If `emit_events` is set to `true`, the server response will be emitted as an Event.  The "body" value of the Event is the response body.  If the `parse_body` option is set to `true` and the content type of the response is JSON, it is parsed to a JSON object.  Otherwise it is raw text.  A raw HTML/XML text can be fed to a WebsiteAgent for parsing (using its `data_from_event` and `type` options).
         The Event will also have a "headers" hash and a "status" integer value.
 
         If `output_mode` is set to `merge`, the emitted Event will be merged into the original contents of the received Event.
@@ -56,16 +55,17 @@ module Agents
       MD
     end
 
-    event_description <<-MD
+    event_description <<~MD
       Events look like this:
-        {
-          "status": 200,
-          "headers": {
-            "Content-Type": "text/html",
-            ...
-          },
-          "body": "<html>Some data...</html>"
-        }
+
+          {
+            "status": 200,
+            "headers": {
+              "Content-Type": "text/html",
+              ...
+            },
+            "body": "<html>Some data...</html>"
+          }
 
       Original event contents will be merged when `output_mode` is set to `merge`.
     MD
@@ -73,7 +73,7 @@ module Agents
     def default_options
       {
         'post_url' => "http://www.example.com",
-        'expected_receive_period_in_days' => '1',
+        'expected_receive_period_in_days' => 1,
         'content_type' => 'form',
         'method' => 'post',
         'payload' => {
@@ -81,15 +81,17 @@ module Agents
           'something' => 'the event contained {{ somekey }}'
         },
         'headers' => {},
-        'emit_events' => 'false',
-        'no_merge' => 'false',
-        'output_mode' => 'clean'
+        'emit_events' => false,
+        'parse_body' => true,
+        'no_merge' => true,
+        'output_mode' => 'clean',
+        'require_signed_file_pointer' => true
       }
     end
 
     def working?
       return false if recent_error_logs?
-      
+
       if interpolated['expected_receive_period_in_days'].present?
         return false unless last_receive_at && last_receive_at > interpolated['expected_receive_period_in_days'].to_i.days.ago
       end
@@ -106,7 +108,8 @@ module Agents
         errors.add(:base, "post_url is a required field")
       end
 
-      if options['payload'].present? && %w[get delete].include?(method) && !(options['payload'].is_a?(Hash) || options['payload'].is_a?(Array))
+      if options['payload'].present? && %w[get
+                                           delete].include?(method) && !(options['payload'].is_a?(Hash) || options['payload'].is_a?(Array))
         errors.add(:base, "if provided, payload must be a hash or an array")
       end
 
@@ -134,19 +137,29 @@ module Agents
         errors.add(:base, "method must be 'post', 'get', 'put', 'delete', or 'patch'")
       end
 
-      if options['no_merge'].present? && !%[true false].include?(options['no_merge'].to_s)
-        errors.add(:base, "if provided, no_merge must be 'true' or 'false'")
+      if option_provided?(options['no_merge']) && boolify(options['no_merge']).nil? && !options['no_merge'].to_s.include?('{')
+        errors.add(:base, "if provided, no_merge must be a boolean value")
       end
 
-      if options['output_mode'].present? && !options['output_mode'].to_s.include?('{') && !%[clean merge].include?(options['output_mode'].to_s)
+      if options['output_mode'].present? && !options['output_mode'].to_s.include?('{') && !%(clean merge).include?(options['output_mode'].to_s)
         errors.add(:base, "if provided, output_mode must be 'clean' or 'merge'")
+      end
+
+      if option_provided?(options['parse_body']) && boolify(options['parse_body']).nil? &&
+          !options['parse_body'].to_s.include?('{')
+        errors.add(:base, "if provided, parse_body must be a boolean value")
       end
 
       unless headers.is_a?(Hash)
         errors.add(:base, "if provided, headers must be a hash")
       end
 
+      validate_require_signed_file_pointer_options!
       validate_web_request_options!
+    end
+
+    def parse_body?
+      boolify(interpolated['parse_body'])
     end
 
     def receive(incoming_events)
@@ -173,13 +186,15 @@ module Agents
 
       case method
       when 'get', 'delete'
-        params, body = data, nil
+        params = data
+        body = nil
       when 'post', 'put', 'patch'
         params = nil
+        upload_io = get_upload_io(event) if has_file_pointer?(event)
 
         content_type =
-          if has_file_pointer?(event)
-            data[interpolated(event.payload)['upload_key'].presence || 'file'] = get_upload_io(event)
+          if upload_io
+            data[interpolated(event.payload)['upload_key'].presence || 'file'] = upload_io
             nil
           else
             interpolated(event.payload)['content_type']

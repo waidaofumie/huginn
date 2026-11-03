@@ -64,37 +64,22 @@ describe Agents::JiraAgent do
       expect(@checker.send(:request_url, 'foo=bar', 10)).to eq("https://jira.atlassian.com/rest/api/2/search?jql=foo%3Dbar&fields=*all&startAt=10")
     end
 
-
-    it "should not set the 'since' time on the first run" do
-      expected_url = "https://jira.atlassian.com/rest/api/2/search?jql=resolution+%3D+unresolved&fields=*all&startAt=0"
-      expected_headers = {headers: {"User-Agent"=>"Huginn - https://github.com/huginn/huginn"}, basic_auth: {username: "user", password: "pass"}}
-      reply = JSON.parse(File.read(Rails.root.join("spec/data_fixtures/jira.json")))
-      mock(@checker).get(expected_url, expected_headers).returns(reply)
-
-      @checker.check
-    end
-
-    it "should provide set the 'since' time after the first run" do
+    it "sets the 'since' time only after the first run" do
       expected_url_1 = "https://jira.atlassian.com/rest/api/2/search?jql=resolution+%3D+unresolved&fields=*all&startAt=0"
-      expected_url_2 = "https://jira.atlassian.com/rest/api/2/search?jql=resolution+%3D+unresolved&fields=*all&startAt=0"
 
       expected_headers = {headers: {"User-Agent"=>"Huginn - https://github.com/huginn/huginn"}, basic_auth: {username: "user", password: "pass"}}
       reply = JSON.parse(File.read(Rails.root.join("spec/data_fixtures/jira.json")))
 
-      mock(@checker) do 
-        get(expected_url_1, expected_headers).returns(reply)
-        # time specification
-        get(/\d+-\d+-\d+\+\d+%3A\d+/, expected_headers).returns(reply)
-      end
-
+      expect(@checker).to receive(:get).with(expected_url_1, expected_headers).and_return(reply)
       @checker.check
+      expect(@checker).to receive(:get).with(/\d+-\d+-\d+\+\d+%3A\d+/, expected_headers).and_return(reply)
       @checker.check
     end
   end
   describe "#check" do
     it "should be able to retrieve issues" do
       reply = JSON.parse(File.read(Rails.root.join("spec/data_fixtures/jira.json")))
-      mock(@checker).get(anything,anything).returns(reply)
+      expect(@checker).to receive(:get).and_return(reply)
 
       expect { @checker.check }.to change { Event.count }.by(50)
     end

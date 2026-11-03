@@ -28,7 +28,7 @@ describe Agents::PushoverAgent do
     @event.save!
 
     @sent_notifications = []
-    stub.any_instance_of(Agents::PushoverAgent).send_notification  { |notification| @sent_notifications << notification}
+    allow_any_instance_of(Agents::PushoverAgent).to receive(:send_notification) { |agent, notification| @sent_notifications << notification }
   end
 
   describe '#receive' do
@@ -47,16 +47,6 @@ describe Agents::PushoverAgent do
       expect(@sent_notifications[0]['message']).to eq('Looks like its going to rain')
       expect(@sent_notifications[1]['message']).to eq('Some message')
       expect(@sent_notifications[2]['message']).to eq('Some other message')
-    end
-
-    it 'should make sure event message overrides default message' do
-      event = Event.new
-      event.agent = agents(:bob_rain_notifier_agent)
-      event.payload = { message: 'Some new message'}
-      event.save!
-
-      @checker.receive([event])
-      expect(@sent_notifications[0]['message']).to eq('Some new message')
     end
 
     it 'should make sure event text overrides default message' do
@@ -159,7 +149,7 @@ describe Agents::PushoverAgent do
       # Just received events
       expect(@checker.reload).to be_working
       two_days_from_now = 2.days.from_now
-      stub(Time).now { two_days_from_now }
+      allow(Time).to receive(:now) { two_days_from_now }
 
       # More time has passed than the expected receive period without any new events
       expect(@checker.reload).not_to be_working

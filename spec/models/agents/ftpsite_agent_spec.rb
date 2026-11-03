@@ -79,7 +79,7 @@ describe Agents::FtpsiteAgent do
     describe "#check" do
 
       before do
-        stub(@checker).each_entry.returns { |block|
+        allow(@checker).to receive(:each_entry) { |&block|
           block.call("example latest.tar.gz", Time.parse("2014-04-01T10:00:01Z"))
           block.call("example-1.0.tar.gz",    Time.parse("2013-10-01T10:00:00Z"))
           block.call("example-1.1.tar.gz",    Time.parse("2014-04-01T10:00:00Z"))
@@ -103,16 +103,16 @@ describe Agents::FtpsiteAgent do
           ])
         }
 
-        expect(Event.last(2).first.payload).to eq({
-          'file_pointer' => { 'file' => 'example-1.1.tar.gz', 'agent_id' => @checker.id },
+        expect_file_pointer_event(Event.last(2).first, {
+          'file' => 'example-1.1.tar.gz',
           'url' => 'ftp://ftp.example.org/pub/releases/example-1.1.tar.gz',
           'filename' => 'example-1.1.tar.gz',
           'timestamp' => '2014-04-01T10:00:00Z',
         })
 
-        expect { @checker.check }.not_to change { Event.count }
+        expect { @checker.check }.not_to(change { Event.count })
 
-        stub(@checker).each_entry.returns { |block|
+        allow(@checker).to receive(:each_entry) { |&block|
           block.call("example latest.tar.gz", Time.parse("2014-04-02T10:00:01Z"))
 
           # In the long list format the timestamp may look going
@@ -133,31 +133,31 @@ describe Agents::FtpsiteAgent do
           ])
         }
 
-        expect(Event.last(2).first.payload).to eq({
-          'file_pointer' => { 'file' => 'example-1.2.tar.gz', 'agent_id' => @checker.id },
+        expect_file_pointer_event(Event.last(2).first, {
+          'file' => 'example-1.2.tar.gz',
           'url' => 'ftp://ftp.example.org/pub/releases/example-1.2.tar.gz',
           'filename' => 'example-1.2.tar.gz',
           'timestamp' => '2014-04-02T10:00:00Z',
         })
 
-        expect(Event.last.payload).to eq({
-          'file_pointer' => { 'file' => 'example latest.tar.gz', 'agent_id' => @checker.id },
+        expect_file_pointer_event(Event.last, {
+          'file' => 'example latest.tar.gz',
           'url' => 'ftp://ftp.example.org/pub/releases/example%20latest.tar.gz',
           'filename' => 'example latest.tar.gz',
           'timestamp' => '2014-04-02T10:00:01Z',
         })
 
-        expect { @checker.check }.not_to change { Event.count }
+        expect { @checker.check }.not_to(change { Event.count })
       end
     end
 
     describe "#each_entry" do
       before do
-        stub.any_instance_of(Net::FTP).list.returns [ # Windows format
+        allow_any_instance_of(Net::FTP).to receive(:list).and_return [ # Windows format
           "04-02-14  10:01AM            288720748 example latest.tar.gz",
           "04-01-14  10:05AM            288720710 no-match-example.tar.gz"
         ]
-        stub(@checker).open_ftp.yields Net::FTP.new
+        allow(@checker).to receive(:open_ftp).and_yield(Net::FTP.new)
       end
 
       it "filters out files that don't match the given format" do
@@ -180,53 +180,70 @@ describe Agents::FtpsiteAgent do
 
     context "#open_ftp" do
       before(:each) do
-        @ftp_mock = mock()
-        mock(@ftp_mock).close
-        mock(@ftp_mock).connect('ftp.example.org', 21)
-        mock(@ftp_mock).passive=(true)
-        mock(Net::FTP).new { @ftp_mock }
+        @ftp_mock = double()
+        allow(@ftp_mock).to receive(:close)
+        allow(@ftp_mock).to receive(:connect).with('ftp.example.org', 21)
+        allow(@ftp_mock).to receive(:passive=).with(true)
+        allow(Net::FTP).to receive(:new) { @ftp_mock }
       end
+
+      it "passes connection options separately from the host" do
+        expect(Net::FTP).to receive(:new).with(nil, anything).and_return(@ftp_mock)
+        expect(@ftp_mock).to receive(:login).with("anonymous", "anonymous@")
+        expect(@ftp_mock).to receive(:chdir).with("pub/releases")
+
+        @checker.open_ftp(@checker.base_uri) do |ftp|
+          expect(ftp).to eq(@ftp_mock)
+        end
+      end
+
+      it "preserves errors raised before the FTP connection is created" do
+        allow(Net::FTP).to receive(:new).and_raise(ArgumentError, "invalid FTP options")
+
+        expect { @checker.open_ftp(@checker.base_uri) }.to raise_error(ArgumentError, "invalid FTP options")
+      end
+
       context 'with_path' do
-        before(:each) { mock(@ftp_mock).chdir('pub/releases') }
+        before(:each) { expect(@ftp_mock).to receive(:chdir).with('pub/releases') }
 
         it "logs in as anonymous when no user and password are given" do
-          mock(@ftp_mock).login('anonymous', 'anonymous@')
+          expect(@ftp_mock).to receive(:login).with('anonymous', 'anonymous@')
           expect { |b| @checker.open_ftp(@checker.base_uri, &b) }.to yield_with_args(@ftp_mock)
         end
 
         it "passes the provided user and password" do
           @checker.options['url'] = "ftp://user:password@ftp.example.org/pub/releases/"
-          mock(@ftp_mock).login('user', 'password')
+          expect(@ftp_mock).to receive(:login).with('user', 'password')
           expect { |b| @checker.open_ftp(@checker.base_uri, &b) }.to yield_with_args(@ftp_mock)
         end
       end
 
       it "does not call chdir when no path is given" do
         @checker.options['url'] = "ftp://ftp.example.org/"
-        mock(@ftp_mock).login('anonymous', 'anonymous@')
+        expect(@ftp_mock).to receive(:login).with('anonymous', 'anonymous@')
         expect { |b| @checker.open_ftp(@checker.base_uri, &b) }.to yield_with_args(@ftp_mock)
       end
     end
 
     context "#get_io" do
       it "returns the contents of the file" do
-        ftp_mock= mock()
-        mock(ftp_mock).getbinaryfile('file', nil).yields('data')
-        mock(@checker).open_ftp(@checker.base_uri).yields(ftp_mock)
+        ftp_mock = double()
+        expect(ftp_mock).to receive(:getbinaryfile).with('file', nil).and_yield('data')
+        expect(@checker).to receive(:open_ftp).with(@checker.base_uri).and_yield(ftp_mock)
         expect(@checker.get_io('file').read).to eq('data')
       end
 
       it "uses the encoding specified in force_encoding to convert the data to UTF-8" do
-        ftp_mock= mock()
-        mock(ftp_mock).getbinaryfile('file', nil).yields('ümlaut'.force_encoding('ISO-8859-15'))
-        mock(@checker).open_ftp(@checker.base_uri).yields(ftp_mock)
+        ftp_mock = double()
+        expect(ftp_mock).to receive(:getbinaryfile).with('file', nil).and_yield('ümlaut'.force_encoding('ISO-8859-15'))
+        expect(@checker).to receive(:open_ftp).with(@checker.base_uri).and_yield(ftp_mock)
         expect(@checker.get_io('file').read).to eq('ümlaut')
       end
 
       it "returns an empty StringIO instance when no data was read" do
-        ftp_mock= mock()
-        mock(ftp_mock).getbinaryfile('file', nil)
-        mock(@checker).open_ftp(@checker.base_uri).yields(ftp_mock)
+        ftp_mock = double()
+        expect(ftp_mock).to receive(:getbinaryfile).with('file', nil)
+        expect(@checker).to receive(:open_ftp).with(@checker.base_uri).and_yield(ftp_mock)
         expect(@checker.get_io('file').length).to eq(0)
       end
     end
@@ -236,25 +253,34 @@ describe Agents::FtpsiteAgent do
         @checker.options['mode'] = 'write'
         @checker.options['filename'] = 'file.txt'
         @checker.options['data'] = '{{ data }}'
-        @ftp_mock= mock()
+        @ftp_mock = double()
         @stringio = StringIO.new()
-        mock(@checker).open_ftp(@checker.base_uri).yields(@ftp_mock)
+        allow(@checker).to receive(:open_ftp).with(@checker.base_uri).and_yield(@ftp_mock)
       end
 
       it "writes the data at data into a file" do
-        mock(StringIO).new('hello world🔥') { @stringio }
-        mock(@ftp_mock).storbinary('STOR file.txt', @stringio, Net::FTP::DEFAULT_BLOCKSIZE)
+        expect(StringIO).to receive(:new).with('hello world🔥') { @stringio }
+        expect(@ftp_mock).to receive(:storbinary).with('STOR file.txt', @stringio, Net::FTP::DEFAULT_BLOCKSIZE)
         event = Event.new(payload: {'data' => 'hello world🔥'})
         @checker.receive([event])
       end
 
       it "converts the string encoding when force_encoding is specified" do
         @checker.options['force_encoding'] = 'ISO-8859-1'
-        mock(StringIO).new('hello world?') { @stringio }
-        mock(@ftp_mock).storbinary('STOR file.txt', @stringio, Net::FTP::DEFAULT_BLOCKSIZE)
+        expect(StringIO).to receive(:new).with('hello world?') { @stringio }
+        expect(@ftp_mock).to receive(:storbinary).with('STOR file.txt', @stringio, Net::FTP::DEFAULT_BLOCKSIZE)
         event = Event.new(payload: {'data' => 'hello world🔥'})
         @checker.receive([event])
       end
     end
+  end
+
+  def expect_file_pointer_event(event, payload)
+    expect(event.payload).to include(payload.except('file'))
+    expect(event.payload['file_pointer']).to include(
+      'file' => payload['file'],
+      'agent_id' => @checker.id
+    )
+    expect(event.payload['file_pointer']['signature']).to be_present
   end
 end

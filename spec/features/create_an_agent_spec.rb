@@ -7,7 +7,7 @@ describe "Creating a new agent", js: true do
 
   it "creates an agent" do
     visit "/"
-    page.find("a", text: "Agents").trigger(:mouseover)
+    page.find("a", text: "Agents").hover
     click_on("New Agent")
 
     select_agent_type("Trigger Agent")
@@ -43,7 +43,7 @@ describe "Creating a new agent", js: true do
 
     it "creates an agent with a source and a receiver" do
       visit "/"
-      page.find("a", text: "Agents").trigger(:mouseover)
+      page.find("a", text: "Agents").hover
       click_on("New Agent")
 
       select_agent_type("Trigger Agent")
@@ -64,7 +64,7 @@ describe "Creating a new agent", js: true do
 
     it "creates an agent with a control target" do
       visit "/"
-      page.find("a", text: "Agents").trigger(:mouseover)
+      page.find("a", text: "Agents").hover
       click_on("New Agent")
 
       select_agent_type("Scheduler Agent")
@@ -83,7 +83,7 @@ describe "Creating a new agent", js: true do
 
     it "creates an agent with a controller" do
       visit "/"
-      page.find("a", text: "Agents").trigger(:mouseover)
+      page.find("a", text: "Agents").hover
       click_on("New Agent")
 
       select_agent_type("Weather Agent")
@@ -102,19 +102,52 @@ describe "Creating a new agent", js: true do
   end
 
   it "creates an alert if a new agent with invalid json is submitted" do
+    invalid_json = <<~JSON
+      {
+        "expected_receive_period_in_days": "2"
+        "keep_event": "false"
+      }
+    JSON
+
     visit "/"
-    page.find("a", text: "Agents").trigger(:mouseover)
+    page.find("a", text: "Agents").hover
     click_on("New Agent")
 
     select_agent_type("Trigger Agent")
     fill_in(:agent_name, with: "Test Trigger Agent")
-    click_on("Toggle View")
+    page.execute_script("document.getElementById('agent_options').value = #{invalid_json.to_json}")
+    expect(get_alert_text_from {
+             click_on "Save"
+           }).to have_text("Sorry, there appears to be an error in your JSON input. Please fix it before continuing.")
+  end
 
-    fill_in(:agent_options, with: '{
-      "expected_receive_period_in_days": "2"
-      "keep_event": "false"
-    }')
-    expect(get_alert_text_from { click_on "Save" }).to have_text("Sorry, there appears to be an error in your JSON input. Please fix it before continuing.")
+  it "opens the Agent picker and prioritizes name matches" do
+    visit new_agent_path
+
+    expect(page).to have_css(".select2-container--open")
+
+    result_order = page.evaluate_script(<<~JS)
+      (() => {
+        const { matcher, sorter } = $("#agent_type").data("select2").options.options;
+        const agents = [
+          { text: "Alpha Agent", title: "find first", element: { index: 1 } },
+          { text: "A Find Agent", title: "", element: { index: 2 } },
+          { text: "Beta Agent", title: "later find", element: { index: 3 } },
+          { text: "Find Agent", title: "", element: { index: 4 } },
+        ];
+        const matches = agents
+          .map((agent) => matcher({ term: "find" }, agent))
+          .filter(Boolean);
+        return sorter(matches).map(({ text }) => text);
+      })()
+    JS
+
+    expect(result_order).to eq([
+      "Find Agent",
+      "A Find Agent",
+      "Alpha Agent",
+      "Beta Agent",
+    ])
   end
 
   context "displaying the correct information" do
@@ -170,7 +203,6 @@ describe "Creating a new agent", js: true do
 
     it "does not send previously configured receivers when the current agent does not support them" do
       select_agent_type("Website Agent scrapes")
-      sleep 0.5
       select2("ZKCD", from: 'Receivers')
       select_agent_type("Email Agent")
       fill_in(:agent_name, with: "No receivers")

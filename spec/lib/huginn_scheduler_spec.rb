@@ -3,9 +3,9 @@ require 'huginn_scheduler'
 
 describe HuginnScheduler do
   before(:each) do
-    @rufus_scheduler = Rufus::Scheduler.new
+    @rufus_scheduler = Rufus::Scheduler.new(frequency: 0.01)
     @scheduler = HuginnScheduler.new
-    stub(@scheduler).setup {}
+    allow(@scheduler).to receive(:setup)
     @scheduler.setup!(@rufus_scheduler, Mutex.new)
   end
 
@@ -14,27 +14,33 @@ describe HuginnScheduler do
   end
 
   it "schould register the schedules with the rufus scheduler and run" do
-    mock(@rufus_scheduler).join
+    expect(@rufus_scheduler).to receive(:join)
     scheduler = HuginnScheduler.new
     scheduler.setup!(@rufus_scheduler, Mutex.new)
     scheduler.run
   end
 
   it "should run scheduled agents" do
-    mock(Agent).run_schedule('every_1h')
-    mock.instance_of(IO).puts('Queuing schedule for every_1h')
+    expect(Agent).to receive(:run_schedule).with('every_1h')
+    expect_any_instance_of(IO).to receive(:puts).with('Queued schedule for every_1h')
+    @scheduler.send(:run_schedule, 'every_1h')
+  end
+
+  it "should log when a scheduled run is already queued" do
+    expect(AgentRunScheduleJob).to receive(:perform_later).with('every_1h').and_return(false)
+    expect_any_instance_of(IO).to receive(:puts).with('Skipped schedule for every_1h (already queued)')
     @scheduler.send(:run_schedule, 'every_1h')
   end
 
   it "should propagate events" do
-    mock(Agent).receive!
-    stub.instance_of(IO).puts
+    expect(Agent).to receive(:receive!)
+    expect_any_instance_of(IO).to receive(:puts)
     @scheduler.send(:propagate!)
   end
 
   it "schould clean up expired events" do
-    mock(Event).cleanup_expired!
-    stub.instance_of(IO).puts
+    expect(Event).to receive(:cleanup_expired!)
+    expect_any_instance_of(IO).to receive(:puts)
     @scheduler.send(:cleanup_expired_events!)
   end
 
@@ -96,9 +102,11 @@ describe Rufus::Scheduler do
     @taoe, Thread.abort_on_exception = Thread.abort_on_exception, false
     @oso, @ose, $stdout, $stderr = $stdout, $stderr, StringIO.new, StringIO.new
 
-    @scheduler = Rufus::Scheduler.new
+    @scheduler = Rufus::Scheduler.new(frequency: 0.01)
+    # Inspect registration without executing scheduled Agent jobs.
+    @scheduler.pause
 
-    stub.any_instance_of(Agents::SchedulerAgent).second_precision_enabled { true }
+    allow_any_instance_of(Agents::SchedulerAgent).to receive(:second_precision_enabled) { true }
 
     @agent1 = Agents::SchedulerAgent.new(name: 'Scheduler 1', options: { action: 'run', schedule: '*/1 * * * * *' }).tap { |a|
       a.user = users(:bob)

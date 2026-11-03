@@ -25,14 +25,14 @@ describe Agents::CommanderAgent do
 
   describe "check" do
     it "should command targets" do
-      stub(Agent).async_check(target.id).once { nil }
+      expect(Agent).to receive(:async_check).with(target.id, deduplicate: true).once.and_return(true)
       agent.check
     end
   end
 
   describe "receive_events" do
     it "should command targets" do
-      stub(Agent).async_check(target.id).once { nil }
+      expect(Agent).to receive(:async_check).with(target.id, deduplicate: true).once.and_return(true)
 
       event = Event.new
       event.agent = agents(:bob_rain_notifier_agent)
@@ -53,7 +53,7 @@ describe Agents::CommanderAgent do
               {
                 'type' => 'field<value',
                 'value' => '200.0',
-                'path' => 'price',
+                'path' => '$.price',
               }
             ],
             keep_event: 'true'
@@ -73,7 +73,7 @@ describe Agents::CommanderAgent do
                 {
                   'type' => 'field<value',
                   'value' => "{{price}}",
-                  'path' => 'price',
+                  'path' => '$.price',
                 }
               ]
             }

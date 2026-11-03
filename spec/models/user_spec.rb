@@ -1,42 +1,57 @@
 require 'rails_helper'
 
 describe User do
+  subject(:user) do
+    described_class.new(
+      username: 'test-user',
+      email: 'test@example.com',
+      password: '12345678',
+      password_confirmation: '12345678',
+      invitation_code: User::INVITATION_CODES.last
+    )
+  end
+
   let(:bob) { users(:bob) }
 
   describe "validations" do
     describe "invitation_code" do
       context "when configured to use invitation codes" do
         before do
-          stub(User).using_invitation_code? {true}
+          allow(User).to receive(:using_invitation_code?) {true}
         end
         
         it "only accepts valid invitation codes" do
-          User::INVITATION_CODES.each do |v|
-            should allow_value(v).for(:invitation_code)
+          User::INVITATION_CODES.each do |value|
+            user.invitation_code = value
+            expect(user).to be_valid
           end
         end
   
         it "can reject invalid invitation codes" do
-          %w['foo', 'bar'].each do |v|
-            should_not allow_value(v).for(:invitation_code)
+          %w[foo bar].each do |value|
+            user.invitation_code = value
+
+            expect(user).not_to be_valid
+            expect(user.errors[:invitation_code]).to include('is not valid')
           end
         end
 
         it "requires no authentication code when requires_no_invitation_code! is called" do
-          u = User.new(username: 'test', email: 'test@test.com', password: '12345678', password_confirmation: '12345678')
-          u.requires_no_invitation_code!
-          expect(u).to be_valid
+          user.invitation_code = nil
+          user.requires_no_invitation_code!
+          expect(user).to be_valid
         end
       end
       
       context "when configured not to use invitation codes" do
         before do
-          stub(User).using_invitation_code? {false}
+          allow(User).to receive(:using_invitation_code?) {false}
         end
         
         it "skips this validation" do
-          %w['foo', 'bar', nil, ''].each do |v|
-            should allow_value(v).for(:invitation_code)
+          ['foo', 'bar', nil, ''].each do |value|
+            user.invitation_code = value
+            expect(user).to be_valid
           end
         end
       end

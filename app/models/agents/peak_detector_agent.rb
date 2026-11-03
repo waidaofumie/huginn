@@ -1,15 +1,15 @@
-require 'pp'
-
 module Agents
   class PeakDetectorAgent < Agent
     cannot_be_scheduled!
 
     DEFAULT_SEARCH_URL = 'https://twitter.com/search?q={q}'
 
-    description <<-MD
+    description <<~MD
       The Peak Detector Agent will watch for peaks in an event stream.  When a peak is detected, the resulting Event will have a payload message of `message`.  You can include extractions in the message, for example: `I saw a bar of: {{foo.bar}}`, have a look at the [Wiki](https://github.com/huginn/huginn/wiki/Formatting-Events-using-Liquid) for details.
 
-      The `value_path` value is a [JSONPath](http://goessner.net/articles/JsonPath/) to the value of interest.  `group_by_path` is a JSONPath that will be used to group values, if present.
+      JSONPath expressions use RFC 9535.  Set `use_legacy_jsonpath` to `true` to retain legacy JSONPath syntax and behavior.
+
+      The `value_path` value is a [JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html) to the value of interest.  `group_by_path` is a JSONPath that will be used to group values, if present.
 
       Set `expected_receive_period_in_days` to the maximum amount of time that you'd expect to pass between Events being received by this Agent.
 
@@ -20,7 +20,7 @@ module Agents
       You may set `search_url` to point to something else than Twitter search, using the URI Template syntax defined in [RFC 6570](https://tools.ietf.org/html/rfc6570). Default value is `#{DEFAULT_SEARCH_URL}` where `{q}` will be replaced with group name.
     MD
 
-    event_description <<-MD
+    event_description <<~MD
       Events look like:
 
           {
@@ -37,7 +37,7 @@ module Agents
       end
       begin
         tmpl = search_url
-      rescue => e
+      rescue StandardError => e
         errors.add(:base, "search_url must be a valid URI template: #{e.message}")
       else
         unless tmpl.keys.include?('q')
@@ -49,8 +49,8 @@ module Agents
     def default_options
       {
         'expected_receive_period_in_days' => "2",
-        'group_by_path' => "filter",
-        'value_path' => "count",
+        'group_by_path' => "$.filter",
+        'value_path' => "$.count",
         'message' => "A peak of {{count}} was found in {{filter}}",
         'min_events' => '4',
       }
@@ -81,13 +81,18 @@ module Agents
       return if memory['data'][group].length <= options['min_events'].to_i
 
       if memory['peaks'][group].empty? || memory['peaks'][group].last < event.created_at.to_i - peak_spacing
-        average_value, standard_deviation = stats_for(group, :skip_last => 1)
+        average_value, standard_deviation = stats_for(group, skip_last: 1)
         newest_value, newest_time = memory['data'][group][-1].map(&:to_f)
 
         if newest_value > average_value + std_multiple * standard_deviation
           memory['peaks'][group] << newest_time
           memory['peaks'][group].reject! { |p| p <= newest_time - window_duration }
-          create_event :payload => { 'message' => interpolated(event)['message'], 'peak' => newest_value, 'peak_time' => newest_time, 'grouped_by' => group.to_s }
+          create_event payload: {
+            'message' => interpolated(event)['message'],
+            'peak' => newest_value,
+            'peak_time' => newest_time,
+            'grouped_by' => group.to_s
+          }
         end
       end
     end
@@ -132,19 +137,20 @@ module Agents
     end
 
     def group_for(event)
-      ((interpolated['group_by_path'].present? && Utils.value_at(event.payload, interpolated['group_by_path'])) || 'no_group')
+      group_by_path = interpolated['group_by_path'].presence
+      (group_by_path && value_at(event.payload, group_by_path)) || 'no_group'
     end
 
     def remember(group, event)
       memory['data'] ||= {}
       memory['data'][group] ||= []
-      memory['data'][group] << [ Utils.value_at(event.payload, interpolated['value_path']).to_f, event.created_at.to_i ]
+      memory['data'][group] << [value_at(event.payload, interpolated['value_path']).to_f, event.created_at.to_i]
       cleanup group
     end
 
     def cleanup(group)
       newest_time = memory['data'][group].last.last
-      memory['data'][group].reject! { |value, time| time <= newest_time - window_duration }
+      memory['data'][group].reject! { |_value, time| time <= newest_time - window_duration }
     end
   end
 end

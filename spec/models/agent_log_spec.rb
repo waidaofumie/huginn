@@ -68,7 +68,7 @@ describe AgentLog do
     end
 
     it "cleans up old logs when there are more than log_length" do
-      stub(AgentLog).log_length { 4 }
+      allow(AgentLog).to receive(:log_length) { 4 }
       AgentLog.log_for_agent(agents(:jane_website_agent), "message 1")
       AgentLog.log_for_agent(agents(:jane_website_agent), "message 2")
       AgentLog.log_for_agent(agents(:jane_website_agent), "message 3")
@@ -93,7 +93,7 @@ describe AgentLog do
 
     it "accepts objects as well as strings" do
       log = AgentLog.log_for_agent(agents(:jane_website_agent), events(:bob_website_agent_event).payload)
-      expect(log.message).to include('"title"=>"foo"')
+      expect(log.message).to include('"title" => "foo"')
     end
   end
 

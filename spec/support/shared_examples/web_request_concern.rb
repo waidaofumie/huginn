@@ -7,6 +7,10 @@ shared_examples_for WebRequestConcern do
     _agent
   end
 
+  it_behaves_like AgentProxyConcern do
+    let(:proxy_client) { agent.faraday }
+  end
+
   describe "validations" do
     it "should be valid" do
       expect(agent).to be_valid
@@ -63,6 +67,12 @@ shared_examples_for WebRequestConcern do
       expect(agent).not_to be_valid
     end
 
+    it "should validate interpolated basic_auth credentials" do
+      agent.user.user_credentials.create!(credential_name: 'http_basic_auth', credential_value: 'user:pass')
+      agent.options['basic_auth'] = '{% credential http_basic_auth %}'
+      expect(agent).to be_valid
+    end
+
     it "should validate disable_ssl_verification" do
       agent.options['disable_ssl_verification'] = nil
       expect(agent).to be_valid
@@ -113,6 +123,13 @@ shared_examples_for WebRequestConcern do
   end
 
   describe "#faraday" do
+    it "bounds connection and request I/O" do
+      expect(agent.faraday.options.open_timeout).to eq(NetworkTimeout.open_timeout)
+      expect(agent.faraday.options.timeout).to eq(NetworkTimeout.timeout)
+      expect(agent.faraday.options.read_timeout).to eq(NetworkTimeout.timeout)
+      expect(agent.faraday.options.write_timeout).to eq(NetworkTimeout.timeout)
+    end
+
     it "should enable SSL verification by default" do
       expect(agent.faraday.ssl.verify).to eq(true)
     end
@@ -157,14 +174,45 @@ shared_examples_for WebRequestConcern do
       expect(agent.faraday.options.params_encoder).to eq(WebRequestConcern::DoNotEncoder)
     end
 
+    describe "proxy" do
+      it "should leave the proxy to the environment when no proxy option is given" do
+        expect(agent.faraday.proxy).to be_nil
+        # A connection given an explicit proxy, even nil, stops consulting http_proxy.
+        expect(agent.faraday.instance_variable_get(:@manual_proxy)).to be_falsey
+      end
+
+      it "should use the proxy option when given" do
+        agent.options['proxy'] = 'http://proxy.example.com:3128'
+        expect(agent).to be_valid
+        expect(agent.faraday.proxy.uri.to_s).to eq('http://proxy.example.com:3128')
+      end
+
+      context "when OUTBOUND_PROXY is set" do
+        before do
+          allow(OutboundProxy).to receive(:url).and_return('http://smokescreen:4750')
+        end
+
+        it "should use the outbound proxy" do
+          expect(agent.faraday.proxy.uri.to_s).to eq('http://smokescreen:4750')
+        end
+
+        it "should refuse a proxy option" do
+          agent.options['proxy'] = 'http://proxy.example.com:3128'
+          expect(agent).not_to be_valid
+          expect(agent.errors[:base]).to include(/proxy cannot be set/)
+          expect(agent.faraday.proxy.uri.to_s).to eq('http://smokescreen:4750')
+        end
+      end
+    end
+
     describe "redirect follow" do
       it "should use FollowRedirects by default" do
-        expect(agent.faraday.builder.handlers).to include(FaradayMiddleware::FollowRedirects)
+        expect(agent.faraday.builder.handlers).to include(Faraday::FollowRedirects::Middleware)
       end
 
       it "should not use FollowRedirects when disabled" do
         agent.options['disable_redirect_follow'] = true
-        expect(agent.faraday.builder.handlers).not_to include(FaradayMiddleware::FollowRedirects)
+        expect(agent.faraday.builder.handlers).not_to include(Faraday::FollowRedirects::Middleware)
       end
     end
   end

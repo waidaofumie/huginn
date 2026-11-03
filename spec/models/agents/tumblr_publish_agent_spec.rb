@@ -24,15 +24,14 @@ describe Agents::TumblrPublishAgent do
       @event.save!
 
       @post_body = {
-        "id" => 5,
-        "title" => "Gonna rain...",
-        "link" => "http://huginnbot.tumblr.com/gonna-rain..."
+        id: 5,
+        title: "Gonna rain...",
+        link: "http://huginnbot.tumblr.com/gonna-rain..."
       }
-      stub.any_instance_of(Agents::TumblrPublishAgent).tumblr {
-        obj = Object.new
-        stub(obj).text(anything, anything) { { "id" => "5" } }
-        stub(obj).posts("huginnbot.tumblr.com", {:id => "5"}) {
-          {"posts" => [@post_body]}
+      allow_any_instance_of(Agents::TumblrPublishAgent).to receive(:tumblr) {
+        double.tap { |obj|
+          allow(obj).to receive(:text).with(anything, anything) { { id: "5" } }
+          allow(obj).to receive(:posts).with("huginnbot.tumblr.com", { id: "5" }) { { posts: [@post_body] } }
         }
       }
 
@@ -44,7 +43,7 @@ describe Agents::TumblrPublishAgent do
         expect(@checker.events.count).to eq(1)
         expect(@checker.events.first.payload['post_id']).to eq('5')
         expect(@checker.events.first.payload['published_post']).to eq('[huginnbot.tumblr.com] text')
-        expect(@checker.events.first.payload["post"]).to eq @post_body
+        expect(@checker.events.first.payload["post"]).to eq @post_body.deep_stringify_keys
       end
     end
   end
@@ -71,8 +70,10 @@ describe Agents::TumblrPublishAgent do
       @event.payload = { :title => "Gonna rain...", :body => 'San Francisco is gonna get wet' }
       @event.save!
 
-      stub.any_instance_of(Agents::TumblrPublishAgent).tumblr {
-        stub!.text(anything, anything) { {"status" => 401,"msg" => "Not Authorized"} }
+      allow_any_instance_of(Agents::TumblrPublishAgent).to receive(:tumblr) {
+        double.tap { |obj|
+          allow(obj).to receive(:text).with(anything, anything) { { status: 401, msg: "Not Authorized" } }
+        }
       }
     end
 

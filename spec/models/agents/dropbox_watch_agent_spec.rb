@@ -19,14 +19,6 @@ describe Agents::DropboxWatchAgent do
     expect(@agent.cannot_receive_events?).to eq true
   end
 
-  it 'has agent description' do
-    expect(@agent.description).to_not be_nil
-  end
-
-  it 'has event description' do
-    expect(@agent.event_description).to_not be_nil
-  end
-
   describe '#valid?' do
     before(:each) { expect(@agent.valid?).to eq true }
 
@@ -50,12 +42,16 @@ describe Agents::DropboxWatchAgent do
 
   describe '#check' do
 
-    let(:first_result) { Dropbox::API::Object.convert([{ 'path_display' => '1.json', 'rev' => '1', 'server_modified' => '01-01-01' }], nil) }
+    let(:first_result) do
+      [
+        { 'path' => '1.json', 'rev' => '1', 'modified' => '01-01-01' }
+      ]
+    end
 
     before(:each) do
-      stub.proxy(Dropbox::API::Client).new do |api|
-        stub(api).ls('/my/dropbox/dir') { first_result }
-      end
+      allow(DropboxApiClient).to receive(:new).and_return(
+        instance_double(DropboxApiClient, ls: first_result)
+      )
     end
 
     it 'saves the directory listing in its memory' do
@@ -75,29 +71,37 @@ describe Agents::DropboxWatchAgent do
 
     context 'subsequent calls' do
 
-      let(:second_result) { Dropbox::API::Object.convert([{ 'path_display' => '2.json', 'rev' => '1', 'server_modified' => '02-02-02' }], nil) }
+      let(:second_result) do
+        [
+          { 'path' => '2.json', 'rev' => '1', 'modified' => '02-02-02' }
+        ]
+      end
 
       before(:each) do
         @agent.memory = { 'contents' => 'not_empty' }
 
-        stub.proxy(Dropbox::API::Client).new do |api|
-          stub(api).ls('/my/dropbox/dir') { second_result }
-        end
+        allow(DropboxApiClient).to receive(:new).and_return(
+          instance_double(DropboxApiClient, ls: second_result)
+        )
       end
 
       it 'sends an event upon a different directory listing' do
         payload = { 'diff' => 'object as hash' }
-        stub.proxy(Agents::DropboxWatchAgent::DropboxDirDiff).new(@agent.memory['contents'], [{"path"=>"2.json", "rev"=>"1", "modified"=>"02-02-02"}]) do |diff|
-          stub(diff).empty? { false }
-          stub(diff).to_hash { payload }
+        allow(Agents::DropboxWatchAgent::DropboxDirDiff).to receive(:new).with(@agent.memory['contents'], [{"path"=>"2.json", "rev"=>"1", "modified"=>"02-02-02"}]) do
+          instance_double(Agents::DropboxWatchAgent::DropboxDirDiff).tap { |diff|
+            allow(diff).to receive(:empty?) { false }
+            allow(diff).to receive(:to_hash) { payload }
+          }
         end
         expect { @agent.check }.to change(Event, :count).by(1)
         expect(Event.last.payload).to eq(payload)
       end
 
       it 'does not sent any events when there is no difference on the directory listing' do
-        stub.proxy(Agents::DropboxWatchAgent::DropboxDirDiff).new(@agent.memory['contents'], [{"path"=>"2.json", "rev"=>"1", "modified"=>"02-02-02"}]) do |diff|
-          stub(diff).empty? { true }
+        allow(Agents::DropboxWatchAgent::DropboxDirDiff).to receive(:new).with(@agent.memory['contents'], [{"path"=>"2.json", "rev"=>"1", "modified"=>"02-02-02"}]) do
+          instance_double(Agents::DropboxWatchAgent::DropboxDirDiff).tap { |diff|
+            allow(diff).to receive(:empty?) { true }
+          }
         end
 
         expect { @agent.check }.to_not change(Event, :count)
@@ -138,15 +142,9 @@ describe Agents::DropboxWatchAgent do
 
       subject(:diff_hash) { Agents::DropboxWatchAgent::DropboxDirDiff.new(previous, current).to_hash }
 
-      it 'detects additions' do
+      it 'detects additions, removals, and updates' do
         expect(diff_hash[:added]).to eq [{ 'path' => '4.json', 'rev' => '1' }]
-      end
-
-      it 'detects removals' do
         expect(diff_hash[:removed]).to eq [ { 'path' => '2.json', 'rev' => '1' } ]
-      end
-
-      it 'detects updates' do
         expect(diff_hash[:updated]).to eq [ { 'path' => '1.json', 'rev' => '2' } ]
       end
 

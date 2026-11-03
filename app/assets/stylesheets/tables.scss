@@ -1,4 +1,5 @@
 // Sortable table headers
+
 .table th a.selected {
   position: relative;
   text-decoration: underline;
@@ -8,15 +9,18 @@
     position: absolute;
     top: 0;
     right: -1em;
-    font-family: FontAwesome;
+    font-family: "Font Awesome 7 Free";
+    font-weight: 900;
+    -webkit-font-smoothing: antialiased;
+    display: inline-block;
   }
 
   &.asc:after {
-    content: '\f0de'; //fa-sort-asc
+    content: "\f0de";  // fa-sort-up (was fa-sort-asc)
   }
 
   &.desc:after {
-    content: '\f0dd'; //fa-sort-desc
+    content: "\f0dd";  // fa-sort-down (was fa-sort-desc)
   }
 }
 
@@ -43,3 +47,9 @@ table.events {
   }
 }
 
+.table.table-row-middle > tbody > tr {
+  > td,
+  > th {
+    vertical-align: middle;
+  }
+}
